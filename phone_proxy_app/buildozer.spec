@@ -20,6 +20,9 @@ android.api = 34
 android.minapi = 21
 android.ndk = 25c
 
+# p4a develop 分支（含最新 SDL2 修复，解决 HyperOS 闪退）
+p4a.branch = develop
+
 # 支持多架构（适配各种手机）
 android.archs = arm64-v8a,armeabi-v7a
 

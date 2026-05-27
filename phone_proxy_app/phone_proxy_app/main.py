@@ -171,9 +171,22 @@ try:
     from kivy.uix.checkbox import CheckBox
     from kivy.clock import Clock
     from kivy.core.window import Window
+    from kivy.graphics import Color, Rectangle
     HAS_KIVY = True
 except ImportError:
     HAS_KIVY = False
+
+# ==================== Android 预初始化（防闪退）====================
+if HAS_KIVY:
+    try:
+        from jnius import autoclass
+        autoclass('android.os.Build')
+        autoclass('android.content.Context')
+        autoclass('android.net.ConnectivityManager')
+        autoclass('android.os.PowerManager')
+        autoclass('org.kivy.android.PythonActivity')
+    except Exception:
+        pass
 
 if not HAS_KIVY:
     def run_cli():
@@ -519,7 +532,6 @@ class ReferralTab(TabbedPanelItem):
                              padding=[10, 6], spacing=2)
             card.canvas.before.clear()
             with card.canvas.before:
-                from kivy.graphics import Color, Rectangle
                 Color(*C_CARD)
                 Rectangle(pos=card.pos, size=card.size)
             card.bind(pos=lambda i, v, c=card: c.canvas.before.children[-1].pos if False else None)
@@ -679,7 +691,6 @@ class TeamTab(TabbedPanelItem):
             card = BoxLayout(size_hint_y=None, height=32, padding=[8, 4], spacing=4)
             card.canvas.before.clear()
             with card.canvas.before:
-                from kivy.graphics import Color, Rectangle
                 Color(*C_CARD)
                 Rectangle(pos=card.pos, size=card.size)
             card.add_widget(_txt(phone, font_size='12sp', size_hint=(0.30, 1)))
@@ -909,7 +920,6 @@ class BindAccountScreen(Screen):
             card = BoxLayout(size_hint_y=None, height=36, padding=[10, 6], spacing=6)
             card.canvas.before.clear()
             with card.canvas.before:
-                from kivy.graphics import Color, Rectangle
                 Color(*C_CARD)
                 Rectangle(pos=card.pos, size=card.size)
             card.add_widget(_txt(phone, font_size='13sp', size_hint=(0.35, 1)))
@@ -998,7 +1008,6 @@ class OrderListScreen(Screen):
                              padding=[10, 4], spacing=2)
             card.canvas.before.clear()
             with card.canvas.before:
-                from kivy.graphics import Color, Rectangle
                 Color(*C_CARD)
                 Rectangle(pos=card.pos, size=card.size)
             card.add_widget(_txt(
@@ -1361,12 +1370,19 @@ class YangMaoApp(App):
         return sm
 
     def on_start(self):
-        global _on_won_callback
-        _on_won_callback = self._show_won_popup
-        force_cellular()  # WiFi + 4G 同时开启时强制走蜂窝数据
-        threading.Thread(target=run_tunnel, daemon=True).start()
-        self._start_foreground()
-        Clock.schedule_interval(self._heartbeat, 60)
+        try:
+            global _on_won_callback
+            _on_won_callback = self._show_won_popup
+            # ⚠️ 前台服务必须最先启动，防止 ANR 被杀
+            self._start_foreground()
+            # 然后才做耗时操作
+            force_cellular()  # WiFi + 4G 同时开启时强制走蜂窝数据
+            threading.Thread(target=run_tunnel, daemon=True).start()
+            Clock.schedule_interval(self._heartbeat, 60)
+        except Exception as e:
+            print(f'[on_start] 启动异常: {e}')
+            import traceback
+            traceback.print_exc()
 
     def _show_won_popup(self, phone, masked, item, order_id):
         """中签弹窗 → 屏幕上显示 '手机号已中签'"""
