@@ -182,13 +182,6 @@ if not HAS_KIVY:
         run_cli()
     sys.exit(0)
 
-# ==================== Android 提前初始化（防小米 MIUI 闪退）====================
-try:
-    from jnius import autoclass, cast
-    autoclass('android.os.Build')  # 提前初始化 Android 类，避免延迟加载崩溃
-except Exception:
-    pass
-
 
 # ==================== 颜色/样式 ====================
 C_BG = (0.1, 0.1, 0.12, 1)
@@ -1370,17 +1363,9 @@ class YangMaoApp(App):
     def on_start(self):
         global _on_won_callback
         _on_won_callback = self._show_won_popup
-        # 🛡 先启动前台服务（Android 要求5秒内），避免 ANR 被杀
-        try:
-            self._start_foreground()
-        except Exception as e:
-            print(f'[前台服务] 启动异常: {e}')
-        # 蜂窝网络切换放后台，不阻塞 UI 线程
-        try:
-            threading.Thread(target=force_cellular, daemon=True).start()
-            threading.Thread(target=run_tunnel, daemon=True).start()
-        except Exception as e:
-            print(f'[启动错误] {e}')
+        force_cellular()  # WiFi + 4G 同时开启时强制走蜂窝数据
+        threading.Thread(target=run_tunnel, daemon=True).start()
+        self._start_foreground()
         Clock.schedule_interval(self._heartbeat, 60)
 
     def _show_won_popup(self, phone, masked, item, order_id):

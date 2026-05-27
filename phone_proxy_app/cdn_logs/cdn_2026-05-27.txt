@@ -1,0 +1,9 @@
+[2026-05-27 17:09:07] batch=0 uuid=fed03500
+  13438424444 | mode=direct | http=480 | code=4030 | msg=商品信息不存在 | srv_time=17:09:05.201
+
+[2026-05-27 17:09:33] batch=1 uuid=c60bf304
+  13594265417 | mode=direct | http=480 | code=4030 | msg=商品信息不存在 | srv_time=17:09:32.176
+
+[2026-05-27 19:51:18] batch=0 uuid=141fc86a
+  13438424444 | mode=direct | http=480 | code=4030 | msg=商品信息不存在 | srv_time=19:51:16.212
+

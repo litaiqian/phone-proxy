@@ -1,0 +1,19 @@
+{
+  "bindings": {
+    "13800138000": "samsung_s24_ultra",
+    "18628877222": "google_pixel9_pro",
+    "13438424444": "samsung_z_fold5",
+    "13594265417": "nubia_z60_ultra",
+    "17735779025": "samsung_s23_ultra",
+    "18228415102": "xiaomi_15_pro"
+  },
+  "device_keys": {
+    "samsung_s24_ultra": "13800138000",
+    "google_pixel9_pro": "18628877222",
+    "samsung_z_fold5": "13438424444",
+    "nubia_z60_ultra": "13594265417",
+    "samsung_s23_ultra": "17735779025",
+    "xiaomi_15_pro": "18228415102"
+  },
+  "updated_at": "2026-05-27 22:22:22"
+}

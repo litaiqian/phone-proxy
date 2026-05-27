@@ -1,0 +1,10 @@
+# 1. 在 GitHub 新建一个私有仓库
+# 2. 把 phone_proxy_app 目录 push 上去
+cd D:\采购管理\媽媽5
+git init
+git add phone_proxy_app .github
+git commit -m "init"
+git remote add origin https://github.com/litaiqian/phone-proxy.git
+
+
+git push -u origin main
