@@ -24,9 +24,9 @@ requirements = python3,kivy,requests,websocket-client,android
 android.permissions = INTERNET,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,WAKE_LOCK,ACCESS_NETWORK_STATE,CHANGE_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIFI_STATE,RECEIVE_BOOT_COMPLETED,POST_NOTIFICATIONS
 
 # 固定版本
-android.api = 31
-android.minapi = 24
-android.ndk = 25b
+android.api = 34
+android.minapi = 26
+android.ndk = 25c
 
 # 架构
 android.archs = arm64-v8a
@@ -67,4 +67,3 @@ android.enable_androidx = True
 [buildozer]
 build_dir = .buildozer
 log_level = 2
-warn_on_crash = True

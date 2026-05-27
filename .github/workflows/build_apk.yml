@@ -33,7 +33,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.buildozer/android/platform
-          key: android-platform-v2-${{ hashFiles('phone_proxy_app/buildozer.spec') }}
+          key: android-platform-v5-${{ hashFiles('phone_proxy_app/buildozer.spec') }}
 
       - name: Install Android SDK build-tools
         run: |
