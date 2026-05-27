@@ -6,8 +6,8 @@ package.name = phone_proxy
 package.domain = top.ipla
 
 # 版本（升级时递增）
-version = 1.0.1
-version.code = 2
+version = 1.0.2
+version.code = 3
 
 # 入口
 source.dir = .
@@ -27,13 +27,16 @@ p4a.branch = develop
 android.archs = arm64-v8a,armeabi-v7a
 
 # ==================== 依赖 ====================
-requirements = python3,kivy,requests,websocket-client,android
+# 注意: 不加 android 包，华为/荣耀无 GMS 会崩溃
+# 所有 Android API 通过 jnius 直接调用
+requirements = python3,kivy,requests,websocket-client
 
 # ==================== 必要权限 ====================
 android.permissions = \
     INTERNET,\
     FOREGROUND_SERVICE,\
     FOREGROUND_SERVICE_DATA_SYNC,\
+    FOREGROUND_SERVICE_SPECIAL_USE,\
     WAKE_LOCK,\
     ACCESS_NETWORK_STATE,\
     CHANGE_NETWORK_STATE,\
@@ -41,6 +44,8 @@ android.permissions = \
     CHANGE_WIFI_STATE,\
     RECEIVE_BOOT_COMPLETED,\
     POST_NOTIFICATIONS,\
+    REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,\
+    SYSTEM_ALERT_WINDOW,\
     QUERY_ALL_PACKAGES,\
     READ_PHONE_STATE,\
     ACCESS_FINE_LOCATION

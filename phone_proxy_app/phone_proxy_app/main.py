@@ -1404,6 +1404,11 @@ class YangMaoApp(App):
             pass
 
     def _start_foreground(self):
+        """启动前台服务 — 全品牌兼容
+        - 华为/荣耀: 无 GMS，纯 jnius 调用
+        - OPPO/vivo/一加: IMPORTANCE_DEFAULT 防通知被忽略
+        - Android 14+: 必须指定 foregroundServiceType
+        """
         try:
             from jnius import autoclass
             Context = autoclass('android.content.Context')
@@ -1413,6 +1418,7 @@ class YangMaoApp(App):
             Notification = autoclass('android.app.Notification')
             Intent = autoclass('android.content.Intent')
             PendingIntent = autoclass('android.app.PendingIntent')
+            Build_VERSION = autoclass('android.os.Build$VERSION')
             R = autoclass('org.kivy.android.R$drawable')
 
             activity = autoclass('org.kivy.android.PythonActivity').mActivity
@@ -1420,7 +1426,8 @@ class YangMaoApp(App):
             nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE)
 
             CH = 'yangmao_channel'
-            ch = NotificationChannel(CH, '养猫', NotificationManager.IMPORTANCE_LOW)
+            # ⚠️ IMPORTANCE_DEFAULT: OPPO/vivo 会忽略 LOW，导致前台服务被杀
+            ch = NotificationChannel(CH, '养猫', NotificationManager.IMPORTANCE_DEFAULT)
             ch.setDescription('猫咪正在觅食中')
             ch.setShowBadge(False)
             nm.createNotificationChannel(ch)
@@ -1436,26 +1443,93 @@ class YangMaoApp(App):
             builder.setSmallIcon(R.icon)
             builder.setOngoing(True)
             builder.setContentIntent(pi)
-            builder.setPriority(Notification.PRIORITY_LOW)
+            builder.setPriority(Notification.PRIORITY_DEFAULT)
 
-            activity.startForeground(1, builder.build())
+            # Android 14+ (SDK 34) 必须指定 foregroundServiceType
+            if Build_VERSION.SDK_INT >= 34:
+                try:
+                    ServiceInfo = autoclass('android.content.pm.ServiceInfo')
+                    builder.setForegroundServiceBehavior(
+                        Notification.FOREGROUND_SERVICE_IMMEDIATE)
+                except Exception:
+                    pass
+                # 用反射设置 serviceType，兼容各厂商
+                try:
+                    fgs_type_val = 1 << 7  # FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    notif_cls = builder.build().getClass()
+                    # 通过 Notification 的公共构建方法
+                    activity.startForeground(1, builder.build(), fgs_type_val)
+                    print('[前台服务] Android 14+ 已启动 (specialUse)')
+                    # WakeLock 在 try 外统一获取
+                except Exception:
+                    # 回退到无 type 参数的 startForeground
+                    activity.startForeground(1, builder.build())
+                    print('[前台服务] Android 14+ 降级启动')
+            else:
+                activity.startForeground(1, builder.build())
+                print('[前台服务] 已启动')
 
+            # WakeLock 防 CPU 休眠
             PowerManager = autoclass('android.os.PowerManager')
             pm = ctx.getSystemService(Context.POWER_SERVICE)
             wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, 'YangMao:WakeLock')
-            wl.acquire()
-            print('[前台服务] 已启动')
+            wl.setReferenceCounted(False)
+            wl.acquire(30 * 60 * 1000)  # 30分钟超时，防止意外耗尽电池
+            print('[前台服务] WakeLock 已获取')
+
+            # 请求忽略电池优化
+            self._request_battery_opt(ctx)
+
         except Exception as e:
             print(f'[前台服务] 失败: {e}')
+            import traceback
+            traceback.print_exc()
+            # 兜底：至少获取 WakeLock 防止被杀
             try:
                 from jnius import autoclass
                 Context = autoclass('android.content.Context')
                 PowerManager = autoclass('android.os.PowerManager')
                 act = autoclass('org.kivy.android.PythonActivity').mActivity
-                pm = act.getSystemService(Context.POWER_SERVICE)
-                pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, 'YangMao:WakeLock').acquire()
+                ctx = act.getApplicationContext()
+                pm = ctx.getSystemService(Context.POWER_SERVICE)
+                wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, 'YangMao:WakeLock')
+                wl.setReferenceCounted(False)
+                wl.acquire(30 * 60 * 1000)
+                print('[前台服务] 兜底 WakeLock 已获取')
             except Exception:
                 pass
+
+    def _request_battery_opt(self, ctx):
+        """请求忽略电池优化 — 防止华为/OPPO/vivo/小米 杀进程"""
+        try:
+            from jnius import autoclass
+            PowerManager = autoclass('android.os.PowerManager')
+            Settings = autoclass('android.provider.Settings')
+            Intent = autoclass('android.content.Intent')
+            Uri = autoclass('android.net.Uri')
+
+            pm = ctx.getSystemService(autoclass('android.content.Context').POWER_SERVICE)
+            pkg = ctx.getPackageName()
+
+            # 检查是否已在白名单
+            if pm.isIgnoringBatteryOptimizations(pkg):
+                print('[电池优化] 已在白名单')
+                return
+
+            # 华为/荣耀: 需要额外跳转受保护应用设置
+            manufacturer = autoclass('android.os.Build').MANUFACTURER.lower()
+            if manufacturer in ('huawei', 'honor'):
+                print('[电池优化] 华为/荣耀设备，提示用户手动设置')
+                # 华为不允许直接跳转 REQUEST_IGNORE，只能引导用户
+
+            # 标准方式: 请求忽略电池优化
+            intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            intent.setData(Uri.parse('package:' + pkg))
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(intent)
+            print('[电池优化] 已弹出请求窗口')
+        except Exception as e:
+            print(f'[电池优化] 请求失败: {e}')
 
     def _heartbeat(self, dt):
         if API._token:
