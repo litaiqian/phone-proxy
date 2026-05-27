@@ -1,0 +1,117 @@
+<?xml version='1.0' encoding='utf8'?>
+<nuitka-compilation-report nuitka_version="4.1.1" nuitka_commercial_version="not installed" mode="standalone" completion="exception">
+  <exception exception_type="NuitkaOptimizationError" exception_value="&#10;duplicate locals name&#10;globals_Crypto$Util&#10;module_dict&#10;Crypto.Util&#10;D:\采购管理\venv\Lib\site-packages\Crypto\Util\__init__.py&#10;Crypto.Util&#10;C:\Program Files\Python311\Lib\site-packages\Crypto\Util\__init__.py&#10;&#10;The above information should be included in a bug report.">
+Traceback (most recent call last):
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\MainControl.py", line 1385, in main
+    _main()
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\MainControl.py", line 1203, in _main
+    main_module = _createMainModule()
+                  ^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\MainControl.py", line 347, in _createMainModule
+    optimizeModules(main_module.getOutputFilename())
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\optimizations\Optimization.py", line 410, in optimizeModules
+    _optimizeModules(output_filename)
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\optimizations\Optimization.py", line 374, in _optimizeModules
+    unfinished_modules = _makeOptimizationPass()
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\optimizations\Optimization.py", line 332, in _makeOptimizationPass
+    changed, micro_passes = optimizeModule(current_module)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\optimizations\Optimization.py", line 200, in optimizeModule
+    return optimizeCompiledPythonModule(module)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\optimizations\Optimization.py", line 159, in optimizeCompiledPythonModule
+    considerUsedModules(module=module, pass_count=pass_count)
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\importing\Recursion.py", line 650, in considerUsedModules
+    new_module = recurseTo(
+                 ^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\importing\Recursion.py", line 124, in recurseTo
+    module = _recurseTo(
+             ^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\importing\Recursion.py", line 66, in _recurseTo
+    module = Building.buildModule(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\tree\Building.py", line 1451, in buildModule
+    module = _createModule(
+             ^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\tree\Building.py", line 1144, in _createModule
+    result = CompiledPythonPackage(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\nodes\ModuleNodes.py", line 758, in __init__
+    CompiledPythonModule.__init__(
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\nodes\ModuleNodes.py", line 309, in __init__
+    self.locals_scope = getLocalsDictHandle(
+                        ^^^^^^^^^^^^^^^^^^^^
+  File "D:\采购管理\venv\Lib\site-packages\nuitka\nodes\LocalsScopes.py", line 41, in getLocalsDictHandle
+    raise NuitkaOptimizationError(
+nuitka.Errors.NuitkaOptimizationError: 
+duplicate locals name
+globals_Crypto$Util
+module_dict
+Crypto.Util
+D:\采购管理\venv\Lib\site-packages\Crypto\Util\__init__.py
+Crypto.Util
+C:\Program Files\Python311\Lib\site-packages\Crypto\Util\__init__.py
+
+The above information should be included in a bug report.
+</exception>
+  <module name="Crypto.Util.strxor" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${sys.real_prefix}\Lib\site-packages\Crypto\Util\strxor.py" distribution="pycryptodome">
+    <module_usages>
+      <module_usage name="Crypto.Util._raw_api" finding="absolute" line="31" />
+    </module_usages>
+  </module>
+  <performance>
+    <memory_usage name="after_launch" value="43872256" />
+  </performance>
+  <data_composer blob_size="None" />
+  <performance-totals>
+    <optimization-time pass="all" time="0.0000" module_count="0" />
+    <code-generation-time time="0.0000" module_count="0" />
+  </performance-totals>
+  <python_binary filename="test.exe" />
+  <command_line>
+    <option value="--standalone" />
+    <option value="--remove-output" />
+    <option value="--output-dir=C:\Users\ADMINI~1\AppData\Local\Temp\test_build4_2094g1sa" />
+    <option value="--nofollow-import-to=curl_cffi" />
+    <option value="--include-package=Crypto" />
+    <option value="C:\Users\ADMINI~1\AppData\Local\Temp\test_build4_2094g1sa\test.py" />
+  </command_line>
+  <plugins>
+    <plugin name="anti-bloat" user_enabled="no" />
+    <plugin name="data-files" user_enabled="no" />
+    <plugin name="delvewheel" user_enabled="no" />
+    <plugin name="dll-files" user_enabled="no" />
+    <plugin name="gevent" user_enabled="no" />
+    <plugin name="gi" user_enabled="no" />
+    <plugin name="glfw" user_enabled="no" />
+    <plugin name="implicit-imports" user_enabled="no" />
+    <plugin name="kivy" user_enabled="no" />
+    <plugin name="matplotlib" user_enabled="no" />
+    <plugin name="multiprocessing" user_enabled="no" />
+    <plugin name="options-nanny" user_enabled="no" />
+    <plugin name="pbr-compat" user_enabled="no" />
+    <plugin name="pkg-resources" user_enabled="no" />
+    <plugin name="playwright" user_enabled="no" />
+    <plugin name="pywebview" user_enabled="no" />
+    <plugin name="spacy" user_enabled="no" />
+    <plugin name="torch-jit" user_enabled="no" />
+    <plugin name="transformers" user_enabled="no" />
+  </plugins>
+  <distributions>
+    <distribution name="pycryptodome" version="3.23.0" installer="pip" />
+  </distributions>
+  <python python_exe="${sys.prefix}\Scripts\python.exe" python_flavor="CPython Official" python_version="3.11.9" os_name="Windows" os_release="10" arch_name="x86_64" filesystem_encoding="utf-8">
+    <search_path>
+      <path value="${cwd}" />
+      <path value="~\AppData\Local\Temp\test_build4_2094g1sa" />
+      <path value="${sys.real_prefix}\DLLs" />
+      <path value="${sys.real_prefix}\Lib" />
+      <path value="${sys.real_prefix}" />
+      <path value="${sys.prefix}" />
+      <path value="${sys.prefix}\Lib\site-packages" />
+      <path value="${sys.real_prefix}\Lib\site-packages" />
+    </search_path>
+  </python>
+  <output run_filename="C:\Users\Administrator\AppData\Local\Temp\test_build4_2094g1sa\test.dist\test.exe" />
+</nuitka-compilation-report>

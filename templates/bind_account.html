@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>==矮猫带==</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+        }
+        .bind-card {
+            width: 100%;
+            max-width: 480px;
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            animation: slideUp 0.5s ease;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .bind-card .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 24px 24px 20px;
+            text-align: center;
+        }
+        .bind-card .card-header .icon-wrap {
+            width: 64px; height: 64px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            font-size: 28px;
+        }
+        .bind-card .card-header h4 {
+            color: #fff;
+            font-weight: 700;
+            margin: 0;
+            font-size: 1.2rem;
+        }
+        .bind-card .card-header p {
+            color: rgba(255,255,255,0.8);
+            margin: 6px 0 0;
+            font-size: 0.85rem;
+        }
+        .bind-card .card-body { padding: 28px 24px; }
+        .form-group { margin-bottom: 18px; }
+        .form-group label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 6px;
+            display: block;
+        }
+        .form-control, .input-group-text {
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+            padding: 10px 14px;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
+        }
+        .input-group .form-control { border-radius: 10px 0 0 10px; }
+        .input-group .btn { border-radius: 0 10px 10px 0; padding: 10px 16px; font-size: 0.85rem; }
+        .btn-send {
+            background: #667eea;
+            border: none;
+            color: #fff;
+            font-weight: 600;
+        }
+        .btn-send:hover:not(:disabled) { background: #5a6fd6; color: #fff; }
+        .btn-send:disabled { background: #b0b8e8; }
+        .btn-submit {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+            color: #fff;
+            font-weight: 600;
+            padding: 12px;
+            border-radius: 10px;
+            width: 100%;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+        .btn-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(102,126,234,0.4); }
+        .btn-submit:disabled { opacity: 0.6; }
+        #bindStatus {
+            font-size: 0.85rem;
+            padding: 8px 12px;
+            border-radius: 8px;
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+        }
+        .health-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .health-bar.online { background: #d4edda; color: #155724; }
+        .health-bar.offline { background: #f8d7da; color: #721c24; }
+        .health-bar.checking { background: #fff3cd; color: #856404; }
+        .health-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .health-dot.online { background: #28a745; }
+        .health-dot.offline { background: #dc3545; }
+        .health-dot.checking { background: #ffc107; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .uploader-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .account-type-white { color: #198754; font-weight: bold; margin-left: 4px; font-size: 0.95em; }
+        .account-type-black { background-color: #212529; color: #ffffff; font-weight: bold; padding: 2px 8px; border-radius: 4px; margin-left: 4px; font-size: 0.95em; }
+    </style>
+</head>
+<body>
+    <div class="bind-card card">
+        <div class="card-header">
+            <div class="icon-wrap">
+                <i class="fas fa-mobile-alt"></i>
+            </div>
+            <h4>绑定手机号</h4>
+            <p>输入手机号并验证，完成账号绑定</p>
+        </div>
+        <div class="card-body">
+            <!-- 服务器状态条 -->
+            <div id="healthBar" class="health-bar checking">
+                <span class="health-dot checking"></span>
+                <span id="healthText">正在检查服务器连接...</span>
+            </div>
+
+            <!-- 上传者信息 -->
+            {% if uploader %}
+            <div class="text-center mb-3">
+                <span class="uploader-badge">
+                    <i class="fas fa-user"></i>分享者：{{ uploader }}
+                </span>
+            </div>
+            {% endif %}
+
+            <!-- 手机号输入 -->
+            <div class="form-group">
+                <label><i class="fas fa-phone me-1"></i>手机号</label>
+                <div class="input-group">
+                    <input type="text" id="bindPhone" class="form-control" placeholder="输入11位手机号" maxlength="11" oninput="this.value=this.value.replace(/\D/g,'')" autocomplete="tel">
+                    <button class="btn btn-send" id="sendCodeBtn" onclick="sendBindCode()" disabled>
+                        <i class="fas fa-envelope me-1"></i>获取验证码
+                    </button>
+                </div>
+            </div>
+
+            <!-- 验证码输入 -->
+            <div class="form-group">
+                <label><i class="fas fa-key me-1"></i>验证码</label>
+                <div class="input-group">
+                    <input type="text" id="bindCode" class="form-control" placeholder="输入6位验证码" maxlength="6" oninput="this.value=this.value.replace(/\D/g,'')" autocomplete="one-time-code">
+                    <button class="btn btn-success" id="submitCodeBtn" onclick="submitBindCode()" disabled>
+                        <i class="fas fa-check me-1"></i>申请绑定
+                    </button>
+                </div>
+            </div>
+
+            <!-- 状态区域 -->
+            <div id="bindStatus" class="text-muted small text-center mb-3">
+                <i class="fas fa-info-circle me-1"></i>等待操作...
+            </div>
+
+            <!-- 提交按钮（全宽） -->
+            <button class="btn-submit" id="submitBtn" onclick="submitBindCode()" disabled>
+                <i class="fas fa-link me-2"></i>立即绑定
+            </button>
+
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+    // ===================== 常量 =====================
+    const DEFAULT_ITEM_CODE = 'IMTP1000313';
+    const DEFAULT_ITEM_NAME = 'IMTP1000313';
+    const DEFAULT_SKU_ID = '741';
+    const DEFAULT_ACT_ID = '82143';
+    const DEFAULT_AMOUNT = 2;
+    const UPLOADER = '{{ uploader }}';
+    const HEALTH_CHECK_INTERVAL = 15000; // 15秒检查一次服务器状态
+
+    // ===================== 状态管理 =====================
+    let isServerOnline = false;
+    let isSending = false;
+    let isSubmitting = false;
+    let currentPhone = '';
+    let countdownTimer = null;
+    let countdownSeconds = 0;
+    let healthTimer = null;
+
+    // ===================== 服务器健康检查 =====================
+    function checkServerHealth() {
+        fetch('/api/health', { method: 'GET', cache: 'no-store' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    isServerOnline = true;
+                    setHealthOnline();
+                    enableForm();
+                } else {
+                    setHealthOffline();
+                    disableForm();
+                }
+            })
+            .catch(() => {
+                isServerOnline = false;
+                setHealthOffline();
+                disableForm();
+            });
+    }
+
+    function setHealthOnline() {
+        const bar = document.getElementById('healthBar');
+        bar.className = 'health-bar online';
+        document.getElementById('healthText').textContent = '服务器在线 ✓';
+    }
+
+    function setHealthOffline() {
+        const bar = document.getElementById('healthBar');
+        bar.className = 'health-bar offline';
+        document.getElementById('healthText').textContent = '服务器离线 ✗ - 请稍后重试';
+    }
+
+    function enableForm() {
+        const phone = document.getElementById('bindPhone').value.trim();
+        document.getElementById('sendCodeBtn').disabled = phone.length !== 11;
+    }
+
+    function disableForm() {
+        document.getElementById('sendCodeBtn').disabled = true;
+        document.getElementById('submitCodeBtn').disabled = true;
+        document.getElementById('submitBtn').disabled = true;
+    }
+
+    // ===================== 手机号输入事件 =====================
+    document.getElementById('bindPhone').addEventListener('input', function() {
+        const phone = this.value.trim();
+        if (!isServerOnline) {
+            document.getElementById('bindStatus').innerHTML = '<span class="text-danger">⚠️ 服务器离线，无法操作</span>';
+            document.getElementById('sendCodeBtn').disabled = true;
+            return;
+        }
+        document.getElementById('sendCodeBtn').disabled = phone.length !== 11;
+        if (phone.length === 11) {
+            document.getElementById('bindStatus').innerHTML = '<span class="text-primary">📱 可以发送验证码</span>';
+        } else {
+            document.getElementById('bindStatus').innerHTML = '<span class="text-muted">⏳ 请输入11位手机号</span>';
+        }
+    });
+
+    // ===================== 发送验证码 =====================
+    function sendBindCode() {
+        if (isSending || !isServerOnline) return;
+        
+        const phone = document.getElementById('bindPhone').value.trim();
+        if (phone.length !== 11) {
+            showToast('请输入正确的11位手机号', 'error');
+            return;
+        }
+        
+        isSending = true;
+        const btn = document.getElementById('sendCodeBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>发送中...';
+        document.getElementById('bindStatus').innerHTML = '<span class="text-info">📤 正在发送验证码...</span>';
+        
+        fetch('/api/bind_account/send_code', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone: phone, uploader: UPLOADER})
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast('验证码已发送', 'success');
+                document.getElementById('bindStatus').innerHTML = '<span class="text-success">✅ 验证码已发送，请查收短信</span>';
+                currentPhone = phone;
+                document.getElementById('submitCodeBtn').disabled = false;
+                document.getElementById('submitBtn').disabled = false;
+                startCountdown(60);
+                document.getElementById('bindCode').focus();
+            } else {
+                showToast(data.message || '发送失败', 'error');
+                document.getElementById('bindStatus').innerHTML = '<span class="text-danger">❌ ' + (data.message || '发送失败') + '</span>';
+                resetSendButton();
+            }
+        })
+        .catch(() => {
+            showToast('网络错误，请检查服务器连接', 'error');
+            document.getElementById('bindStatus').innerHTML = '<span class="text-danger">❌ 网络错误</span>';
+            resetSendButton();
+            checkServerHealth();
+        })
+        .finally(() => {
+            isSending = false;
+        });
+    }
+
+    // ===================== 提交验证码 =====================
+    function submitBindCode() {
+        if (isSubmitting || !isServerOnline) return;
+        
+        const phone = currentPhone || document.getElementById('bindPhone').value.trim();
+        const code = document.getElementById('bindCode').value.trim();
+        
+        if (!phone || phone.length !== 11) {
+            showToast('请先获取验证码', 'error');
+            return;
+        }
+        if (!code) {
+            showToast('请输入验证码', 'error');
+            return;
+        }
+        
+        isSubmitting = true;
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('submitBtn').innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>提交中...';
+        document.getElementById('submitCodeBtn').disabled = true;
+        document.getElementById('bindStatus').innerHTML = '<span class="text-info">🔄 正在提交验证码...</span>';
+        
+        fetch('/api/bind_account/submit_code', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                phone: phone,
+                code: code,
+                item_code: DEFAULT_ITEM_CODE,
+                item_name: DEFAULT_ITEM_NAME,
+                sku_id: DEFAULT_SKU_ID,
+                activity_id: DEFAULT_ACT_ID,
+                amount: DEFAULT_AMOUNT,
+                uploader: UPLOADER
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                let typeLabel = '';
+                if (data.account_type === 'white') {
+                    typeLabel = '<span class="account-type-white">|白号</span>';
+                } else if (data.account_type === 'black') {
+                    typeLabel = '<span class="account-type-black">|黑号</span>';
+                }
+                showToast('🎉 绑定成功！' + (typeLabel ? (data.account_type === 'white' ? '白号' : '黑号') : ''), 'success');
+                document.getElementById('bindStatus').innerHTML = '<span class="text-success" style="font-size:1.1rem;font-weight:600;">✅ 绑定成功！登录信息已保存</span>' + typeLabel;
+                // 清空输入
+                document.getElementById('bindPhone').value = '';
+                document.getElementById('bindCode').value = '';
+                document.getElementById('sendCodeBtn').disabled = true;
+                document.getElementById('submitCodeBtn').disabled = true;
+                document.getElementById('submitBtn').disabled = true;
+                document.getElementById('submitBtn').innerHTML = '<i class="fas fa-link me-2"></i>立即绑定';
+                currentPhone = '';
+            } else {
+                showToast('绑定失败: ' + (data.message || '未知错误'), 'error');
+                document.getElementById('bindStatus').innerHTML = '<span class="text-danger">❌ ' + (data.message || '绑定失败') + '</span>';
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('submitBtn').innerHTML = '<i class="fas fa-link me-2"></i>立即绑定';
+                document.getElementById('submitCodeBtn').disabled = false;
+            }
+        })
+        .catch(() => {
+            showToast('网络错误，请检查服务器连接', 'error');
+            document.getElementById('bindStatus').innerHTML = '<span class="text-danger">❌ 网络错误</span>';
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-link me-2"></i>立即绑定';
+            document.getElementById('submitCodeBtn').disabled = false;
+            checkServerHealth();
+        })
+        .finally(() => {
+            isSubmitting = false;
+        });
+    }
+
+    // ===================== 辅助函数 =====================
+    function resetSendButton() {
+        const btn = document.getElementById('sendCodeBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-envelope me-1"></i>发送';
+        const phone = document.getElementById('bindPhone').value.trim();
+        if (phone.length === 11 && isServerOnline) {
+            btn.disabled = false;
+        }
+    }
+
+    function startCountdown(seconds) {
+        if (countdownTimer) clearInterval(countdownTimer);
+        countdownSeconds = seconds;
+        const btn = document.getElementById('sendCodeBtn');
+        
+        countdownTimer = setInterval(() => {
+            countdownSeconds--;
+            if (countdownSeconds <= 0) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-envelope me-1"></i>重新发送';
+            } else {
+                btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${countdownSeconds}秒后重发`;
+            }
+        }, 1000);
+    }
+
+    // ===================== Toast 通知 =====================
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toastContainer');
+        if (!container) {
+            const div = document.createElement('div');
+            div.innerHTML = `<div aria-live="polite" aria-atomic="true" class="position-relative">
+                <div class="position-fixed top-0 end-0 p-3" style="z-index: 9999; right: 20px; top: 20px;" id="toastContainer2"></div>
+            </div>`;
+            document.body.insertBefore(div.firstElementChild, document.body.firstChild);
+        }
+        const c = document.getElementById('toastContainer') || document.getElementById('toastContainer2');
+        const tid = 't-' + Date.now();
+        const bg = type === 'success' ? 'bg-success' : 'bg-danger';
+        c.insertAdjacentHTML('beforeend', `<div id="${tid}" class="toast align-items-center text-white ${bg} border-0 mb-2" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>`);
+        const el = document.getElementById(tid);
+        new bootstrap.Toast(el, { autohide: true, delay: 3000 }).show();
+        el.addEventListener('hidden.bs.toast', () => el.remove());
+    }
+
+    // ===================== 初始化 =====================
+    // 立即检查服务器状态
+    checkServerHealth();
+    // 每15秒检查一次
+    healthTimer = setInterval(checkServerHealth, HEALTH_CHECK_INTERVAL);
+    </script>
+</body>
+</html>

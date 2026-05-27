@@ -1,0 +1,1506 @@
+{% extends "base.html" %}
+{% block title %}控制台{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    <!-- Toast 消息容器 -->
+    <div aria-live="polite" aria-atomic="true" class="position-relative">
+        <div class="position-fixed top-0 end-0 p-3" style="z-index: 1100; right: 20px; top: 70px;" id="toastContainer"></div>
+    </div>
+
+    <!-- ===== 按钮组：紧贴导航栏下方，无边框，靠右，紧凑 ===== -->
+    <div class="d-flex justify-content-end mt-0 pt-0 mb-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button class="btn btn-sm btn-secondary" id="pauseRushBtn" onclick="togglePauseRush()" style="font-weight:bold;">⏸️ 抢购已暂停</button>
+            <span class="badge bg-secondary" id="clientWindowsBadge" style="font-size:0.85rem;">🖥️ 0台·0窗口</span>
+            <button class="btn btn-danger btn-sm" id="restartServersBtn" onclick="restartAllServers()" style="font-weight:bold;">🔁 重启所有服务</button>
+            <button class="btn btn-danger btn-sm" id="refreshLoginBtn">🔄 刷新登录</button>
+            <button class="btn btn-sm btn-outline-primary" id="importJsonBtn" onclick="importAccountsFromJson()">📥 拉取备份数据</button>
+            <button class="btn btn-sm btn-outline-info" id="teamMgmtBtn" onclick="openTeamModal()">👥 团队管理</button>
+            <button class="btn btn-sm btn-outline-dark" id="clearBlackBtn" onclick="clearBlackAccounts()">🗑️ 清除黑号</button>
+            <button class="btn btn-info btn-sm" id="queryBidBtn">🏆 查询中标结果</button>
+
+            <button class="btn btn-warning btn-sm" id="clearAllBtn" onclick="if(confirm('确定要删除所有账号吗？')) clearAllRecords()">🗑️ 清空</button>
+            <span id="buildProgress" class="text-muted small" style="display: none;"></span>
+        </div>
+    </div>
+
+    <!-- ===== 顶部统计条 + 导入导出 + 核心按钮 ===== -->
+    <div class="row align-items-center bg-light rounded shadow-sm p-2 mb-3">
+        <!-- 统计行 -->
+        <div class="col-12 d-flex align-items-center flex-wrap gap-3">
+            <span class="fw-bold">📊 统计</span>
+            <span>总账号：<b id="stat-total">0</b></span>
+            <span class="text-success">✅ 成功登录：<b id="stat-login">0</b></span>
+            <span class="text-danger">❌ 掉线：<b id="stat-offline">0</b></span>
+            <span class="text-success">🏆 中标：<b id="stat-bid">0</b></span>
+            <span class="text-secondary">😴 未登录：<b id="stat-never">0</b></span>
+            <span class="text-success">⚪ 白号：<b id="stat-white">0</b></span>
+            <span>⚫ 黑号：<b id="stat-black">0</b></span>
+            <span class="text-info">💰 支付二维码：<b id="stat-qrcode">0</b></span>
+            <span class="text-primary">🌐 代理IP：<b id="stat-ip-count">0</b></span>
+            <span class="text-success">就绪/<b id="stat-ip-ready">0</b></span>
+            <span class="text-muted">池中/<b id="stat-ip-pool">0</b></span>
+            <span class="text-muted">已配/<b id="stat-ip-bound">0</b></span>
+            <span class="text-muted">独立/<b id="stat-ip-unique">0</b></span>
+        </div>
+        <!-- 团队统计行 -->
+        <div class="col-12 d-flex align-items-center flex-wrap gap-3 mt-1">
+            <span class="fw-bold">👥 团队</span>
+            <span>团队账号：<b id="stat-team-total">0</b></span>
+            <span class="text-success">🏆 抢购成功：<b id="stat-team-bid">0</b></span>
+            <span class="text-success">💳 已付款：<b id="stat-team-paid">0</b></span>
+            <span class="text-warning">⏳ 待付款：<b id="stat-team-unpaid">0</b></span>
+            <!-- 团队筛选 -->
+            <div class="ms-auto">
+                <select class="form-select form-select-sm" id="teamFilter" onchange="filterByTeam()" style="width: auto; display: inline-block;">
+                    <option value="">🌐 全部团队</option>
+                    {% for t in teams %}
+                    <option value="{{ t.name }}">👥 {{ t.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <!-- 导入导出/配置行 -->
+        <div class="col-12 d-flex align-items-center flex-wrap gap-2 mt-2">
+            <div class="input-group input-group-sm" style="width: auto;">
+                <input type="file" id="excelFile" class="form-control form-control-sm" accept=".xlsx,.xls" style="max-width: 160px;">
+                <button class="btn btn-outline-primary btn-sm" onclick="uploadExcel()">📥 导入</button>
+            </div>
+            <a href="/api/export" class="btn btn-outline-secondary btn-sm">📤 导出</a>
+            <div class="input-group input-group-sm" style="width: auto;">
+                <span class="input-group-text">频率（毫秒）</span>
+                <input type="number" id="taskFrequency" class="form-control" value="1" min="1" max="10" style="width: 80px;" onchange="saveConfig({task_frequency: parseInt(this.value)})">
+            </div>
+            <div class="input-group input-group-sm" style="width: auto;">
+                <span class="input-group-text">单次抢购次数（查库存）</span>
+                <input type="number" id="rushCount" class="form-control" value="100" min="1" style="width: 80px;" onchange="saveConfig({rush_count: parseInt(this.value)})">
+            </div>
+            <div class="input-group input-group-sm" style="width: auto;">
+                <span class="input-group-text">窗口抢购总数</span>
+                <input type="number" id="rushAttempts" class="form-control" value="10000" min="100" step="1000" style="width: 100px;" onchange="saveConfig({rush_attempts: parseInt(this.value)})">
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 全局配置卡片（抢购时间、多开设置、代理） ===== -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row justify-content-start align-items-center" style="gap: 30px;">
+                <!-- 抢购模式开关 -->
+                <div class="col-auto">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="rushModeSwitch" onchange="saveRushMode(this.checked)">
+                        <label class="form-check-label fw-bold" for="rushModeSwitch" style="font-size:0.85rem;">🛒 抢购模式</label>
+                    </div>
+                </div>
+                <!-- 间隔模式开关（抢购时间前面） -->
+                <div class="col-auto">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="intervalModeSwitch" onchange="saveIntervalMode(this.checked)">
+                        <label class="form-check-label fw-bold" for="intervalModeSwitch" style="font-size:0.85rem;">⏱️ 每5分钟间隔</label>
+                    </div>
+                </div>
+                <!-- 抢购时间 -->
+                <div class="col-auto">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">⏰抢购时间</span>
+                        <input type="number" id="rushHour" class="form-control" min="0" max="23" value="8" style="width: 45px; flex: none;" onchange="saveRushTime()">
+                        <span class="input-group-text">:</span>
+                        <input type="number" id="rushMinute" class="form-control" min="0" max="59" value="58" style="width: 45px; flex: none;" onchange="saveRushTime()">
+                        <span class="input-group-text">:</span>
+                        <input type="number" id="rushSecond" class="form-control" min="0" max="59" value="0" style="width: 45px; flex: none;" onchange="saveRushTime()">
+                        <span class="input-group-text">.</span>
+                        <input type="number" id="rushMillisecond" class="form-control" min="0" max="999" value="0" style="width: 55px; flex: none;" onchange="saveRushTime()" placeholder="毫秒">
+                    </div>
+                </div>
+                <!-- 批量发送间隔（暂时隐藏） -->
+                <!--
+                <div class="col-auto">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">⏱️批量发送短信</span>
+                        <input type="number" id="minDelay" class="form-control" value="10" min="1" placeholder="最小" style="width: 50px; flex: none;" onchange="saveDelayConfig()">
+                        <span class="input-group-text">~</span>
+                        <input type="number" id="maxDelay" class="form-control" value="20" min="2" placeholder="最大" style="width: 50px; flex: none;" onchange="saveDelayConfig()">
+                        <button class="btn btn-danger btn-sm" id="batchSendBtn">⚡发送</button>
+                    </div>
+                </div>
+                -->
+                <!-- 多开设置 -->
+                <div class="col-auto">
+                    <div class="d-flex align-items-center gap-1">
+                        <label class="fw-bold text-nowrap mb-0" style="font-size:0.85rem;">⚙️ 多开设置</label>
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <span class="input-group-text">🖥️ 窗口数</span>
+                            <input type="number" id="clientWindows" class="form-control" value="10" min="1" max="50" style="width: 60px; flex: none;" onchange="saveConfig({client_windows: parseInt(this.value)})">
+                        </div>
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <span class="input-group-text">多开数</span>
+                            <input type="number" id="taskWindowCount" class="form-control" value="1" min="1" max="10" style="width: 60px; flex: none;" onchange="saveConfig({multi_open_count: parseInt(this.value)})">
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="distributionModeSwitch" onchange="saveDistributionMode(this.checked)">
+                            <label class="form-check-label fw-bold" style="font-size:0.8rem;">继续分配</label>
+                        </div>
+                    </div>
+                </div>
+                <!-- 代理配置 -->
+                <div class="col-auto">
+                    <div class="d-flex align-items-center gap-1">
+                        <button class="btn btn-sm" id="proxyToggleBtn" onclick="toggleProxy()" style="font-weight:bold;">🔘 代理已关闭</button>
+                        <input type="text" id="proxyUrl" class="form-control form-control-sm" placeholder="https://api.wandouapp.com/?app_key=...&xy=3&type=2&..." style="width: 320px;" onchange="saveProxyUrl()">
+                    </div>
+                </div>
+                <!-- 不上号筛选 -->
+                <div class="col-auto">
+                    <button class="btn btn-warning btn-sm" id="excludeBtn" onclick="openExcludeModal()" style="font-weight:bold;">🚫 不上号(0)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 服务器列表卡片 ===== -->
+    <div class="card mb-3" id="serverListCard" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center py-1">
+            <span class="fw-bold">🖥️ 服务器列表</span>
+            <small class="text-muted" id="serverRefreshTime"></small>
+        </div>
+        <div class="card-body py-2">
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-0">
+                    <thead class="table-light">
+                        <tr><th>主机名</th><th>IP</th><th>窗口</th><th>账号</th><th>最后心跳</th><th>状态</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="serverListBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 号码数据表格 ===== -->
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+            <thead style="background-color: #f8f9fa; color: #000000;">
+                <tr>
+                    <th>团队</th><th>上传者</th><th>手机号</th>
+                    <th>商品编号</th><th>数量</th>
+                    <th>操作</th><th>登录状态</th><th>中标结果</th><th>支付链接</th><th>支付二维码</th><th>登录时间</th>
+                </tr>
+            </thead>
+            <tbody id="recordBody">
+                {% if records_with_uploaders %}
+                    {% for item in records_with_uploaders %}
+                    {% set rec = item.record %}
+                    <tr data-phone="{{ rec.phone }}" data-team="{{ rec.team or '' }}" data-login-status="{% if rec.logged_in %}success{% elif rec.token or rec.cookie %}offline{% else %}never{% endif %}">
+                        <td class="team-cell">
+                            <select class="form-select form-select-sm team-input" style="width: 100px;" onchange="saveAccountConfig('{{ rec.phone }}')">
+                                <option value="">--</option>
+                                {% for t in teams %}
+                                <option value="{{ t.name }}" {% if rec.team == t.name %}selected{% endif %}>{{ t.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="uploader-cell"><input type="text" class="form-control form-control-sm uploader-input" value="{{ item.uploader_username }}" style="width: 80px;" placeholder="上传者" onchange="saveAccountConfig('{{ rec.phone }}')"></td>
+                        <td>{{ rec.phone }}</td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm item-name-input" value="{{ rec.item_name or '' }}" style="width: 120px;" placeholder="IMTP1000313" onchange="saveAccountConfig('{{ rec.phone }}')">
+                        </td>
+                        <td>
+                            <input type="number" class="form-control form-control-sm amount-input" value="{{ rec.amount or 1 }}" min="1" style="width: 60px;" onchange="saveAccountConfig('{{ rec.phone }}')">
+                        </td>
+                        <td style="white-space: nowrap;">
+                            <button class="btn btn-info btn-sm send-btn{% if rec.logged_in %} disabled{% endif %}" data-phone="{{ rec.phone }}"{% if rec.logged_in %} disabled{% endif %}>发短信</button>
+                            <input type="text" class="form-control form-control-sm code-input d-inline-block" placeholder="验证码" style="width: 70px;"{% if rec.logged_in %} disabled{% endif %}>
+                            <button class="btn btn-success btn-sm submit-btn{% if rec.logged_in %} disabled{% endif %}" data-phone="{{ rec.phone }}"{% if rec.logged_in %} disabled{% endif %}>提交</button>
+                            <button class="btn btn-outline-info btn-sm refresh-one-btn" data-phone="{{ rec.phone }}" title="刷新该账号登录状态">🔄</button>
+                        </td>
+                        <td class="status-cell">
+                            {% if rec.logged_in %}
+                            <span class="text-success fw-bold">成功</span>{% if rec.account_type == 'white' %}<span class="account-type-white">|白号</span>{% elif rec.account_type == 'black' %}<span class="account-type-black">|黑号</span>{% endif %}
+                            {% else %}
+                            <span class="text-danger fw-bold">掉线</span>
+                            {% endif %}
+                        </td>
+                        <td class="bid-cell">{{ rec.bid_result or '' }}</td>
+                        <td class="pay-url-cell">
+                            {% if rec.pay_url %}
+                                {% if rec.pay_status == 'success' %}
+                                    <span class="text-success fw-bold">✅ 支付成功</span>
+                                {% elif rec.pay_status == 'pending' %}
+                                    <a href="{{ rec.pay_url }}" target="_blank" class="btn btn-outline-primary btn-sm">💳 云闪付支付</a>
+                                {% else %}
+                                    <a href="{{ rec.pay_url }}" target="_blank" class="btn btn-outline-secondary btn-sm">🔗 支付链接</a>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted small">未生成</span>
+                            {% endif %}
+                        </td>
+                        <td class="qrcode-cell">
+                            <span class="qrcode-placeholder" data-phone="{{ rec.phone }}">
+                                <!-- 二维码将由 JS 动态加载 -->
+                            </span>
+                        </td>
+                        <td class="login-time-cell">
+                            {% if rec.login_time %}
+                                {% set today = now() %}
+                                {% set login_date = rec.login_time.date() %}
+                                {% set days_diff = (today.date() - login_date).days %}
+                                {% if days_diff == 0 %}
+                                    <span class="text-success fw-bold">今天</span>
+                                {% elif days_diff == 1 %}
+                                    <span class="text-info fw-bold">1天前</span>
+                                {% else %}
+                                    <span class="text-secondary">{{ days_diff }}天前</span>
+                                {% endif %}
+                                <br><small class="text-muted">{{ rec.login_time.strftime('%Y-%m-%d') }}</small>
+                            {% else %}
+                                <span class="text-muted small">未登录</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="11" class="text-center text-muted py-4">
+                            <h5>📭 暂无数据</h5>
+                            <p>请导入 Excel 文件或联系管理员添加账号。</p>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ===== 导入导出字段规则说明 ===== -->
+    <div class="card mb-3">
+        <div class="card-header bg-info text-white">
+            <h5 class="mb-0">📋 导入导出字段规则说明</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <!-- 导入规则 -->
+                <div class="col-md-6">
+                    <h6 class="text-primary">📥 导入Excel格式要求：</h6>
+                    <ul class="list-unstyled">
+                        <li><strong>方式一（推荐）：</strong>首行为字段名称</li>
+                        <li style="padding-left: 20px;">• 列名：<code>团队</code>、<code>手机号</code>、<code>商品编号</code>、<code>数量</code></li>
+                        <li style="padding-left: 20px;">• 商品编号填写 SPU 编码（如 <code>IMTP1000313</code>），规格ID和活动ID由系统自动获取</li>
+                        <li style="padding-left: 20px;">• 示例：</li>
+                        <li style="padding-left: 40px;">
+                            <table class="table table-sm table-bordered" style="width: auto; font-size: 0.85rem;">
+                                <thead class="table-light">
+                                    <tr><th>团队</th><th>手机号</th><th>商品编号</th><th>数量</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td>团队A</td><td>13800138000</td><td>IMTP1000313</td><td>1</td></tr>
+                                    <tr><td>团队B</td><td>13900139000</td><td>IMTP1000313</td><td>2</td></tr>
+                                </tbody>
+                            </table>
+                        </li>
+                        <li style="margin-top: 10px;"><strong>方式二：</strong>无表头（固定位置）</li>
+                        <li style="padding-left: 20px;">• 第1列：团队名称</li>
+                        <li style="padding-left: 20px;">• 第2列：手机号码</li>
+                        <li style="padding-left: 20px;">• 第3列：商品编号（SPU编码，如 <code>IMTP1000313</code>）</li>
+                        <li style="padding-left: 20px;">• 第4列：抢购数量（默认1）</li>
+                    </ul>
+                </div>
+                <!-- 导出规则 -->
+                <div class="col-md-6">
+                    <h6 class="text-success">📤 导出Excel字段说明：</h6>
+                    <ul class="list-unstyled">
+                        <li>• <strong>团队：</strong>账号所属团队名称</li>
+                        <li>• <strong>手机号：</strong>手机号码（唯一标识）</li>
+                        <li>• <strong>验证码已发送：</strong>是/否</li>
+                        <li>• <strong>登录状态：</strong>成功/掉线</li>
+                        <li>• <strong>中标结果：</strong>中奖信息或未中奖</li>
+                        <li>• <strong>最后更新：</strong>最后更新时间（YYYY-MM-DD HH:MM:SS）</li>
+                    </ul>
+                    <div class="alert alert-warning mt-2" style="font-size: 0.9rem;">
+                        <strong>💡 提示：</strong>导出的Excel文件可以直接用于导入，首行包含字段名称。
+                    </div>
+                </div>
+            </div>
+            <hr>
+            <div class="text-muted" style="font-size: 0.85rem;">
+                <strong>注意事项：</strong>
+                <ul class="mb-0" style="padding-left: 20px;">
+                    <li>手机号必须是纯数字，长度至少7位</li>
+                    <li>重复的手机号会被自动跳过</li>
+                    <li>支持 .xlsx 和 .xls 格式</li>
+                    <li>导入时会自动清理手机号中的空格、横杠、括号等特殊字符</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 不上号筛选模态框 -->
+    <div class="modal fade" id="excludeModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-warning text-dark">
+            <h5 class="modal-title">🚫 不上号筛选</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body" id="excludeModalBody">
+            <p class="text-muted small">勾选的团队或上传者下的账号将不参与分配给客户端。</p>
+            <h6 class="mt-3 mb-2"><strong>按团队排除</strong></h6>
+            <div id="excludeTeamList"></div>
+            <h6 class="mt-4 mb-2"><strong>按上传者排除</strong></h6>
+            <div id="excludeUploaderList"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+    <!-- 团队管理模态框 -->
+    <div class="modal fade" id="teamModal" tabindex="-1">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-info text-white">
+            <h5 class="modal-title">👥 团队管理</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <!-- 添加团队 -->
+            <div class="card mb-3">
+              <div class="card-body py-2">
+                <h6 class="mb-2">➕ 创建团队</h6>
+                <div class="row g-2">
+                  <div class="col-md-3"><input type="text" class="form-control form-control-sm" id="newTeamName" placeholder="团队名称"></div>
+                  <div class="col-md-3"><input type="text" class="form-control form-control-sm" id="newTeamUser" placeholder="登录账号"></div>
+                  <div class="col-md-3"><input type="password" class="form-control form-control-sm" id="newTeamPass" placeholder="登录密码"></div>
+                  <div class="col-md-3"><button class="btn btn-info btn-sm w-100" onclick="createTeam()">创建</button></div>
+                </div>
+              </div>
+            </div>
+            <!-- 团队列表 -->
+            <div id="teamListContainer">
+              <p class="text-muted text-center">加载中...</p>
+            </div>
+            <!-- 分配账号区域 -->
+            <div class="card mt-3" id="assignArea" style="display:none;">
+              <div class="card-body py-2">
+                <h6 class="mb-2">📋 分配账号到 <span id="assignTeamName" class="text-info"></span></h6>
+                <div class="mb-2">
+                  <input type="text" class="form-control form-control-sm" id="assignPhoneInput" placeholder="输入手机号，回车添加">
+                </div>
+                <div id="assignPhoneList" class="d-flex flex-wrap gap-1 mb-2"></div>
+                <button class="btn btn-success btn-sm" onclick="assignAccounts()">✅ 确认分配</button>
+                <button class="btn btn-danger btn-sm ms-2" onclick="unassignAccounts()">❌ 移除选中</button>
+                <button class="btn btn-secondary btn-sm ms-2" onclick="document.getElementById('assignArea').style.display='none'">关闭</button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---------- 全局 Toast 函数 ----------
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    const toastId = 'toast-' + Date.now();
+    const bgClass = type === 'success' ? 'bg-success' : (type === 'error' ? 'bg-danger' : 'bg-warning');
+    const html = `
+        <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0 mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="3000">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    const toastEl = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastEl, { autohide: true, delay: 3000 });
+    toast.show();
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+}
+
+// ---------- 手动导入备份数据 ----------
+async function importAccountsFromJson() {
+    const btn = document.getElementById('importJsonBtn');
+    btn.disabled = true;
+    btn.textContent = '📥 导入中...';
+    try {
+        const res = await fetch('/api/import_accounts_from_json', {method: 'POST'});
+        if (!res.ok) {
+            showToast('会话已过期，请重新登录', 'error');
+            window.location.href = '/login';
+            return;
+        }
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message, 'success');
+            location.reload();
+        } else {
+            showToast('导入失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('网络错误，导入失败', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📥 拉取备份数据';
+    }
+}
+
+// ---------- 清空所有账号 ----------
+async function clearAllRecords() {
+    const res = await fetch('/api/clear_all_records', {method: 'POST'});
+    const data = await res.json();
+    showToast(data.message, data.status === 'success' ? 'success' : 'error');
+    if (data.status === 'success') location.reload();
+}
+
+// ---------- JavaScript 动态加载二维码（支付宝二维码） ----------
+async function loadQRCodes() {
+    document.querySelectorAll('.qrcode-placeholder').forEach(placeholder => {
+        const phone = placeholder.dataset.phone;
+        const imgUrl = `/qrcode/${phone}`;
+        fetch(imgUrl, { method: 'HEAD' }).then(res => {
+            if (res.ok) {
+                placeholder.innerHTML = `<img src="${imgUrl}" width="100" height="100" class="img-thumbnail" title="支付二维码" style="cursor:pointer" data-bs-toggle="modal" data-bs-target="#qrModal" data-img="${imgUrl}">`;
+            } else {
+                placeholder.innerHTML = '<span class="text-muted small">未支付</span>';
+            }
+        }).catch(() => {
+            placeholder.innerHTML = '<span class="text-muted small">加载失败</span>';
+        });
+    });
+}
+
+// ---------- 全局配置加载与保存 ----------
+function loadGlobalConfig() {
+    fetch('/api/get_config')
+        .then(res => res.json())
+        .then(cfg => {
+            document.getElementById('rushHour').value = cfg.rush_hour;
+            document.getElementById('rushMinute').value = cfg.rush_minute;
+            document.getElementById('rushSecond').value = cfg.rush_second;
+            if (cfg.rush_millisecond !== undefined) {
+                document.getElementById('rushMillisecond').value = cfg.rush_millisecond;
+            }
+            if (cfg.multi_open_count !== undefined) {
+                document.getElementById('taskWindowCount').value = cfg.multi_open_count;
+            }
+            if (cfg.client_windows !== undefined) {
+                document.getElementById('clientWindows').value = cfg.client_windows;
+            }
+            if (cfg.multi_open_enabled !== undefined) {
+                document.getElementById('distributionModeSwitch').checked = cfg.multi_open_enabled;
+            }
+            if (cfg.rush_attempts !== undefined) {
+                document.getElementById('rushAttempts').value = cfg.rush_attempts;
+            }
+            if (cfg.task_frequency !== undefined) {
+                document.getElementById('taskFrequency').value = cfg.task_frequency;
+            }
+            if (cfg.rush_count !== undefined) {
+                document.getElementById('rushCount').value = cfg.rush_count;
+            }
+            if (cfg.anti_ban_proxy_enabled !== undefined) {
+                updateProxyButton(cfg.anti_ban_proxy_enabled);
+            }
+            if (cfg.anti_ban_proxy_url && document.getElementById('proxyUrl')) {
+                document.getElementById('proxyUrl').value = cfg.anti_ban_proxy_url;
+            }
+            if (cfg.rush_paused !== undefined) {
+                updatePauseButton(cfg.rush_paused);
+            }
+            if (cfg.rush_mode !== undefined) {
+                document.getElementById('rushModeSwitch').checked = cfg.rush_mode === 1;
+                updateRushModeLabel(cfg.rush_mode === 1);
+            }
+            if (cfg.interval_mode !== undefined) {
+                document.getElementById('intervalModeSwitch').checked = cfg.interval_mode === 1;
+                updateIntervalModeLabel(cfg.interval_mode === 1);
+            }
+            if (cfg.min_delay !== undefined && document.getElementById('minDelay')) {
+                document.getElementById('minDelay').value = cfg.min_delay;
+            }
+            if (cfg.max_delay !== undefined && document.getElementById('maxDelay')) {
+                document.getElementById('maxDelay').value = cfg.max_delay;
+            }
+        });
+}
+loadGlobalConfig();
+
+// 通用配置保存函数
+function saveConfig(data) {
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(res => res.json()).then(result => {
+        if (result.status === 'success') {
+            showToast('配置已保存');
+        }
+    });
+}
+
+// 继续分配开关自动保存
+function saveDistributionMode(enabled) {
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ multi_open_enabled: enabled })
+    }).then(res => res.json()).then(result => {
+        if (result.status === 'success') {
+            showToast(enabled ? '继续分配已开启' : '继续分配已关闭');
+        }
+    });
+}
+
+// 抢购模式开关自动保存
+function saveRushMode(enabled) {
+    updateRushModeLabel(enabled);
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ rush_mode: enabled ? 1 : 0 })
+    }).then(res => res.json()).then(result => {
+        if (result.status === 'success') {
+            showToast(enabled ? '抢购模式已开启（正式抢购）' : '抢购模式已关闭（调试模式）');
+        }
+    }).catch(err => {
+        showToast('保存失败，请重试', 'error');
+        document.getElementById('rushModeSwitch').checked = !enabled;
+        updateRushModeLabel(!enabled);
+    });
+}
+
+function updateRushModeLabel(enabled) {
+    const label = document.querySelector('label[for="rushModeSwitch"]');
+    if (!label) return;
+    if (enabled) {
+        label.style.color = '#0d6efd';
+        label.style.fontWeight = 'bold';
+    } else {
+        label.style.color = '#6c757d';
+        label.style.fontWeight = 'bold';
+    }
+}
+
+// 间隔模式开关自动保存
+function saveIntervalMode(enabled) {
+    updateIntervalModeLabel(enabled);
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ interval_mode: enabled ? 1 : 0 })
+    }).then(res => res.json()).then(result => {
+        if (result.status === 'success') {
+            showToast(enabled ? '间隔模式已开启（每5分钟一轮）' : '连续模式已开启（一直抢）');
+        }
+    }).catch(err => {
+        showToast('保存失败，请重试', 'error');
+        // 恢复开关状态
+        document.getElementById('intervalModeSwitch').checked = !enabled;
+        updateIntervalModeLabel(!enabled);
+    });
+}
+
+// 更新间隔模式开关的标签样式
+function updateIntervalModeLabel(enabled) {
+    const label = document.querySelector('label[for="intervalModeSwitch"]');
+    if (!label) {
+        // fallback: 通过相邻元素查找
+        const sw = document.getElementById('intervalModeSwitch');
+        if (sw && sw.nextElementSibling) {
+            sw.nextElementSibling.style.color = enabled ? '#0d6efd' : '#6c757d';
+            sw.nextElementSibling.style.fontWeight = 'bold';
+        }
+        return;
+    }
+    if (enabled) {
+        label.style.color = '#0d6efd';  // 蓝色
+        label.style.fontWeight = 'bold';
+    } else {
+        label.style.color = '#6c757d';  // 灰色
+        label.style.fontWeight = 'bold';
+    }
+}
+
+// 保存延迟配置（仅当元素存在时有效）
+function saveDelayConfig() {
+    const minEl = document.getElementById('minDelay');
+    const maxEl = document.getElementById('maxDelay');
+    if (!minEl || !maxEl) return;
+    const min = parseInt(minEl.value);
+    const max = parseInt(maxEl.value);
+    if (min > max) return showToast('最小间隔不能大于最大间隔', 'error');
+    localStorage.setItem('minDelay', min);
+    localStorage.setItem('maxDelay', max);
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({min_delay: min, max_delay: max})
+    });
+    showToast('请求间隔已保存！');
+}
+
+// ===== 暂停/恢复抢购开关 =====
+async function togglePauseRush() {
+    const btn = document.getElementById('pauseRushBtn');
+    const isPaused = btn.textContent.includes('已暂停');
+    const url = isPaused ? '/api/resume_rush' : '/api/pause_rush';
+    const res = await fetch(url, {method: 'POST'});
+    const data = await res.json();
+    if (data.status === 'success') {
+        updatePauseButton(data.rush_paused);
+        showToast(data.rush_paused ? '抢购已暂停' : '抢购已恢复', 'success');
+    }
+}
+
+function updatePauseButton(paused) {
+    const btn = document.getElementById('pauseRushBtn');
+    if (paused) {
+        btn.className = 'btn btn-sm btn-secondary';
+        btn.textContent = '⏸️ 抢购已暂停';
+        btn.style.fontWeight = 'bold';
+    } else {
+        btn.className = 'btn btn-sm btn-primary';
+        btn.textContent = '▶️ 抢购运行中';
+        btn.style.fontWeight = 'bold';
+    }
+}
+
+// ===== 代理开关 =====
+async function toggleProxy() {
+    const btn = document.getElementById('proxyToggleBtn');
+    const isEnabled = btn.textContent.includes('已开启');
+    const res = await fetch('/api/toggle_proxy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: !isEnabled})
+    });
+    const data = await res.json();
+    if (data.status === 'success') {
+        updateProxyButton(data.proxy_enabled);
+        showToast(data.proxy_enabled ? '代理已开启' : '代理已关闭', 'success');
+    }
+}
+
+function updateProxyButton(enabled) {
+    const btn = document.getElementById('proxyToggleBtn');
+    if (enabled) {
+        btn.className = 'btn btn-sm btn-primary';
+        btn.textContent = '🔘 代理已开启';
+    } else {
+        btn.className = 'btn btn-sm btn-secondary';
+        btn.textContent = '🔘 代理已关闭';
+    }
+}
+
+async function saveProxyUrl() {
+    const url = document.getElementById('proxyUrl').value.trim();
+    await fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({anti_ban_proxy_url: url})
+    });
+}
+
+// 保存抢购时间
+function saveRushTime() {
+    const rush_hour = parseInt(document.getElementById('rushHour').value);
+    const rush_minute = parseInt(document.getElementById('rushMinute').value);
+    const rush_second = parseInt(document.getElementById('rushSecond').value);
+    const rush_millisecond = parseInt(document.getElementById('rushMillisecond').value) || 0;
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rush_hour, rush_minute, rush_second, rush_millisecond})
+    }).then(() => showToast('抢购时间已保存'));
+}
+
+// 导入Excel
+function uploadExcel() {
+    const file = document.getElementById('excelFile').files[0];
+    if (!file) return showToast('请选择Excel文件', 'error');
+    const formData = new FormData();
+    formData.append('file', file);
+    fetch('/api/upload', {method: 'POST', body: formData})
+        .then(res => res.json())
+        .then(data => {
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+            if(data.status === 'success') location.reload();
+        })
+        .catch(err => showToast('上传失败', 'error'));
+}
+
+// 批量发送验证码（仅当元素存在时绑定）
+const _batchSendBtn = document.getElementById('batchSendBtn');
+if (_batchSendBtn) {
+    _batchSendBtn.onclick = async () => {
+        const min = parseInt(document.getElementById('minDelay').value);
+        const max = parseInt(document.getElementById('maxDelay').value);
+        if (min > max) return showToast('最小间隔不能大于最大间隔', 'error');
+        const res = await fetch('/api/batch_send_code', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({min_delay: min, max_delay: max})
+        });
+        const data = await res.json();
+        showToast(data.message, data.status === 'success' ? 'success' : 'error');
+    };
+}
+
+// 绑定单个发送/提交事件
+function bindRowEvents() {
+    document.querySelectorAll('.send-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const phone = btn.dataset.phone;
+            const res = await fetch('/api/send_code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({phone})
+            });
+            const data = await res.json();
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+        };
+    });
+    document.querySelectorAll('.submit-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const phone = btn.dataset.phone;
+            const codeInput = btn.parentElement.querySelector('.code-input');
+            const code = codeInput.value.trim();
+            if (!code) return showToast('请输入验证码', 'error');
+            const res = await fetch('/api/submit_code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({phone, code})
+            });
+            const data = await res.json();
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+            if (data.status === 'success') refreshAllData();
+        };
+    });
+    // 单号刷新登录
+    document.querySelectorAll('.refresh-one-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const phone = btn.dataset.phone;
+            const origText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳';
+            try {
+                const res = await fetch('/api/refresh_login_single', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({phone})
+                });
+                const data = await res.json();
+                if (data.status === 'success' && data.results && data.results[phone]) {
+                    const info = data.results[phone];
+                    const row = document.querySelector(`tr[data-phone="${phone}"]`);
+                    if (row) {
+                        const statusCell = row.querySelector('.status-cell');
+                        const status_desc = info.status_desc;
+                        const account_type = info.account_type || '';
+                        let html = '';
+                        if (status_desc === 'success') {
+                            html = '<span class="text-success fw-bold">成功</span>';
+                            if (account_type === 'white') html += '<span class="account-type-white">|白号</span>';
+                            else if (account_type === 'black') html += '<span class="account-type-black">|黑号</span>';
+                        } else if (status_desc === 'offline') {
+                            html = '<span class="text-danger fw-bold">掉线</span>';
+                        } else {
+                            html = '<span class="text-secondary fw-bold">未登录</span>';
+                        }
+                        statusCell.innerHTML = html;
+                        row.setAttribute('data-login-status', status_desc);
+                        row.setAttribute('data-account-type', account_type);
+                    }
+                    showToast(`${phone} 刷新完成: ${info.status_desc}`, 'success');
+                    updateStats();
+                    updateSendButtons();
+                } else {
+                    showToast(data.message || '刷新失败', 'error');
+                }
+            } catch (e) {
+                console.error('单号刷新异常:', e);
+                showToast('网络错误', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = origText;
+            }
+        };
+    });
+}
+
+// 刷新登录状态（核心）
+async function refreshLoginStatus() {
+    const btn = document.getElementById('refreshLoginBtn');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '🔄 刷新中...';
+    try {
+        const res = await fetch('/api/refresh_login', {method: 'POST'});
+        if (!res.ok) {
+            showToast('会话已过期，请重新登录', 'error');
+            window.location.href = '/login';
+            return;
+        }
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            showToast('会话已过期，请重新登录', 'error');
+            window.location.href = '/login';
+            return;
+        }
+        const data = await res.json();
+        console.log('响应数据:', data);
+        if (data.status === 'success') {
+            for (const [phone, info] of Object.entries(data.results)) {
+                const row = document.querySelector(`tr[data-phone="${phone}"]`);
+                if (row) {
+                    const statusCell = row.querySelector('.status-cell');
+                    const status_desc = info.status_desc;
+                    const account_type = info.account_type || '';
+                    let html = '';
+                    if (status_desc === 'success') {
+                        html = '<span class="text-success fw-bold">成功</span>';
+                        if (account_type === 'white') {
+                            html += '<span class="account-type-white">|白号</span>';
+                        } else if (account_type === 'black') {
+                            html += '<span class="account-type-black">|黑号</span>';
+                        }
+                    } else if (status_desc === 'offline') {
+                        html = '<span class="text-danger fw-bold">掉线</span>';
+                    } else {
+                        html = '<span class="text-secondary fw-bold">未登录</span>';
+                    }
+                    statusCell.innerHTML = html;
+                    row.setAttribute('data-login-status', status_desc);
+                    row.setAttribute('data-account-type', account_type);
+                } else {
+                    console.warn(`未找到手机号 ${phone} 对应的行`);
+                }
+            }
+            await updateStats();
+            updateSendButtons();
+            showToast('登录状态已刷新', 'success');
+        } else {
+            showToast('刷新失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        console.error('刷新登录异常:', e);
+        showToast('网络错误，刷新失败', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
+// 更新统计数字
+async function updateStats() {
+    try {
+        const res = await fetch('/api/stats');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const stats = await res.json();
+        document.getElementById('stat-total').innerText = stats.total;
+        document.getElementById('stat-login').innerText = stats.success_login;
+        document.getElementById('stat-offline').innerText = stats.offline;
+        document.getElementById('stat-never').innerText = stats.never_login;
+        document.getElementById('stat-bid').innerText = stats.bid_success;
+        document.getElementById('stat-qrcode').innerText = stats.qrcode_count;
+        document.getElementById('stat-white').innerText = stats.white_count || 0;
+        document.getElementById('stat-black').innerText = stats.black_count || 0;
+        // IP统计
+        document.getElementById('stat-ip-count').innerText = (stats.ip_bound_count || 0);
+        document.getElementById('stat-ip-ready').innerText = (stats.ip_ready_pool_count || 0);
+        document.getElementById('stat-ip-pool').innerText = (stats.ip_pool_count || 0);
+        document.getElementById('stat-ip-bound').innerText = (stats.ip_bound_count || 0);
+        document.getElementById('stat-ip-unique').innerText = (stats.ip_unique_count || 0);
+        // 团队统计
+        document.getElementById('stat-team-total').innerText = stats.team_total_accounts || 0;
+        document.getElementById('stat-team-bid').innerText = stats.team_bid_success || 0;
+        document.getElementById('stat-team-paid').innerText = stats.team_paid_success || 0;
+        document.getElementById('stat-team-unpaid').innerText = stats.team_unpaid || 0;
+        // 更新团队筛选下拉框
+        const filter = document.getElementById('teamFilter');
+        const currentVal = filter.value;
+        filter.innerHTML = '<option value="">🌐 全部团队</option>';
+        const teamNames = [];
+        (stats.teams || []).forEach(t => {
+            filter.innerHTML += `<option value="${t.name}" data-id="${t.id}">👥 ${t.name} (${t.account_count})</option>`;
+            teamNames.push(t.name);
+        });
+        filter.value = currentVal;
+        // 同步更新每行团队选择框的选项（新增的团队也要加到下拉中）
+        document.querySelectorAll('#recordBody tr[data-phone]').forEach(row => {
+            const sel = row.querySelector('.team-input');
+            if (!sel) return;
+            const currentTeamNames = Array.from(sel.options).map(o => o.value);
+            teamNames.forEach(name => {
+                if (!currentTeamNames.includes(name)) {
+                    sel.innerHTML += `<option value="${name}">${name}</option>`;
+                }
+            });
+            // 用 select 当前值同步 data-team 属性（后端变更也能生效）
+            const selectVal = sel.value.trim();
+            row.setAttribute('data-team', selectVal);
+        });
+    } catch(e) {
+        console.error('updateStats failed:', e);
+    }
+}
+
+// 查询所有中标结果（实时获取，直接更新表格）
+async function queryAllBidResults() {
+    const res = await fetch('/api/query_bid_results', {method: 'POST'});
+    const data = await res.json();
+    if (data.status === 'success') {
+        for (const [phone, result] of Object.entries(data.results)) {
+            const row = document.querySelector(`tr[data-phone="${phone}"]`);
+            if (row) {
+                const bidCell = row.querySelector('.bid-cell');
+                const balanceCell = row.querySelector('.balance-cell');
+                const payUrlCell = row.querySelector('.pay-url-cell');
+
+                if (bidCell) bidCell.innerText = result.bid_result || '';
+                if (balanceCell) balanceCell.innerText = result.balance || '';
+
+                if (payUrlCell && result.pay_url) {
+                    if (result.pay_status === 'success') {
+                        payUrlCell.innerHTML = '<span class="text-success fw-bold">✅ 支付成功</span>';
+                    } else if (result.pay_status === 'pending') {
+                        payUrlCell.innerHTML = `<a href="${result.pay_url}" target="_blank" class="btn btn-outline-primary btn-sm">💳 云闪付支付</a>`;
+                    } else {
+                        payUrlCell.innerHTML = `<a href="${result.pay_url}" target="_blank" class="btn btn-outline-secondary btn-sm">🔗 支付链接</a>`;
+                    }
+                }
+            }
+        }
+        await updateStats();
+        showToast('中标结果已更新', 'success');
+    } else {
+        showToast('查询失败', 'error');
+    }
+}
+
+// 刷新所有数据
+async function refreshAllData() {
+    await refreshLoginStatus();
+}
+
+
+document.getElementById('refreshLoginBtn').onclick = refreshAllData;
+document.getElementById('queryBidBtn').onclick = queryAllBidResults;
+
+// ===== 清除黑号 =====
+async function clearBlackAccounts() {
+    const btn = document.getElementById('clearBlackBtn');
+    if (!confirm('确定要清除所有黑号账号吗？此操作将从数据库中删除这些账号！')) return;
+    btn.disabled = true;
+    btn.textContent = '🗑️ 清除中...';
+    try {
+        const res = await fetch('/api/clear_black_accounts', {method: 'POST'});
+        const data = await res.json();
+        if (data.status === 'success') {
+            // 从表格中移除已删除的黑号行
+            if (data.deleted_phones) {
+                for (const phone of data.deleted_phones) {
+                    const row = document.querySelector(`tr[data-phone="${phone}"]`);
+                    if (row) row.remove();
+                }
+            }
+            await updateStats();
+            showToast(data.message, 'success');
+        } else {
+            showToast('清除失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('网络错误，清除失败', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🗑️ 清除黑号';
+    }
+}
+
+// 初始加载
+updateStats();
+loadQRCodes();
+bindRowEvents();
+updateSendButtons();
+
+// ===== 团队筛选 =====
+function filterByTeam() {
+    const teamName = document.getElementById('teamFilter').value;
+    const rows = document.querySelectorAll('#recordBody tr[data-phone]');
+    rows.forEach(row => {
+        const rowTeam = row.getAttribute('data-team') || '';
+        if (!teamName || rowTeam === teamName) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+
+// ===== 团队管理 =====
+let _currentTeamId = null;
+let _assignedPhones = [];
+
+async function openTeamModal() {
+    await loadTeams();
+    new bootstrap.Modal(document.getElementById('teamModal')).show();
+}
+
+async function loadTeams() {
+    try {
+        const res = await fetch('/api/teams');
+        const data = await res.json();
+        if (data.status !== 'success') { showToast('加载团队失败', 'error'); return; }
+        const container = document.getElementById('teamListContainer');
+        if (data.teams.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">暂无团队，请创建</p>';
+            return;
+        }
+        container.innerHTML = data.teams.map(t => `
+            <div class="card mb-2">
+              <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <strong>${t.name}</strong>
+                    <small class="text-muted ms-2">账号: ${t.login_username}</small>
+                    <span class="badge bg-info ms-2">${t.account_count} 个账号</span>
+                    <a href="/team/login" target="_blank" class="btn btn-sm btn-outline-secondary ms-2 py-0">🔗 站点</a>
+                  </div>
+                  <div>
+                    <button class="btn btn-outline-primary btn-sm py-0" onclick="editTeam(${t.id}, '${t.name}', '${t.login_username}', '${t.payment_method||''}')">✏️</button>
+                    <button class="btn btn-outline-success btn-sm py-0" onclick="openAssignArea(${t.id}, '${t.name}')">📋分配</button>
+                    <button class="btn btn-outline-danger btn-sm py-0" onclick="deleteTeam(${t.id})">🗑️</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+        `).join('');
+    } catch(e) { showToast('加载团队失败', 'error'); }
+}
+
+async function createTeam() {
+    const name = document.getElementById('newTeamName').value.trim();
+    const login_username = document.getElementById('newTeamUser').value.trim();
+    const password = document.getElementById('newTeamPass').value.trim();
+    if (!name || !login_username || !password) { showToast('请填写完整信息', 'error'); return; }
+    try {
+        const res = await fetch('/api/teams', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, login_username, password})
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message);
+            document.getElementById('newTeamName').value = '';
+            document.getElementById('newTeamUser').value = '';
+            document.getElementById('newTeamPass').value = '';
+            await loadTeams();
+            await updateStats();
+        } else { showToast(data.message, 'error'); }
+    } catch(e) { showToast('网络错误', 'error'); }
+}
+
+async function editTeam(id, name, login_username, payment_method) {
+    const newName = prompt('团队名称:', name);
+    if (!newName || !newName.trim()) return;
+    const newPass = prompt('新密码（留空不修改）:', '');
+    const body = {name: newName.trim()};
+    if (newPass && newPass.trim()) body.password = newPass.trim();
+    try {
+        const res = await fetch(`/api/teams/${id}`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.status === 'success') { showToast(data.message); await loadTeams(); }
+        else { showToast(data.message, 'error'); }
+    } catch(e) { showToast('网络错误', 'error'); }
+}
+
+async function deleteTeam(id) {
+    if (!confirm('确定要删除该团队吗？')) return;
+    try {
+        const res = await fetch(`/api/teams/${id}`, {method: 'DELETE'});
+        const data = await res.json();
+        if (data.status === 'success') { showToast(data.message); await loadTeams(); await updateStats(); }
+        else { showToast(data.message, 'error'); }
+    } catch(e) { showToast('网络错误', 'error'); }
+}
+
+async function openAssignArea(teamId, teamName) {
+    _currentTeamId = teamId;
+    document.getElementById('assignTeamName').textContent = teamName;
+    document.getElementById('assignArea').style.display = 'block';
+    // 加载已分配账号
+    try {
+        const res = await fetch(`/api/teams/${teamId}/accounts`);
+        if (!res.ok) { showToast('加载已分配账号失败 (HTTP ' + res.status + ')', 'error'); return; }
+        const data = await res.json();
+        _assignedPhones = (data.accounts || []).map(a => a.phone);
+        renderAssignedPhones();
+    } catch(e) { showToast('加载账号异常: ' + e.message, 'error'); }
+    // 绑定回车添加（只绑定一次，防止重复绑定）
+    const input = document.getElementById('assignPhoneInput');
+    if (input && !input._bound) {
+        input._bound = true;
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const phone = input.value.trim();
+                if (phone && /^\d{11}$/.test(phone) && !_assignedPhones.includes(phone)) {
+                    _assignedPhones.push(phone);
+                    renderAssignedPhones();
+                }
+                input.value = '';
+                e.preventDefault();
+            }
+        });
+    }
+}
+
+function renderAssignedPhones() {
+    const container = document.getElementById('assignPhoneList');
+    container.innerHTML = _assignedPhones.map(p =>
+        `<span class="badge bg-secondary" style="cursor:pointer;" onclick="_assignedPhones=_assignedPhones.filter(x=>x!=='${p}');renderAssignedPhones();">${p} ✕</span>`
+    ).join('');
+}
+
+async function assignAccounts() {
+    if (!_currentTeamId || _assignedPhones.length === 0) { showToast('请添加手机号', 'error'); return; }
+    try {
+        const res = await fetch(`/api/teams/${_currentTeamId}/assign`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phones: _assignedPhones})
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message);
+            document.getElementById('assignArea').style.display = 'none';
+            await loadTeams(); await updateStats();
+        } else { showToast(data.message, 'error'); }
+    } catch(e) { showToast('网络错误', 'error'); }
+}
+
+async function unassignAccounts() {
+    if (!_currentTeamId || _assignedPhones.length === 0) { showToast('请选择要移除的账号', 'error'); return; }
+    try {
+        const res = await fetch(`/api/teams/${_currentTeamId}/unassign`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phones: _assignedPhones})
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message);
+            _assignedPhones = [];
+            renderAssignedPhones();
+            await loadTeams(); await updateStats();
+        } else { showToast(data.message, 'error'); }
+    } catch(e) { showToast('网络错误', 'error'); }
+}
+
+// 数量输入框限制
+document.querySelectorAll('.amount-input').forEach(el => {
+    el._prev = parseInt(el.value) || 1;
+    el.addEventListener('input', function() {
+        const val = parseInt(this.value);
+        if (isNaN(val)) return;
+        if (this._prev !== undefined && val - this._prev === 1 && val > 2) {
+            this.value = 2;
+        }
+        this._prev = parseInt(this.value) || 1;
+    });
+});
+
+// 根据登录状态禁用发送/提交按钮和验证码输入框
+function updateSendButtons() {
+    document.querySelectorAll('.send-btn, .submit-btn').forEach(btn => {
+        const phone = btn.dataset.phone;
+        const row = document.querySelector(`tr[data-phone="${phone}"]`);
+        if (row) {
+            const loginStatus = row.getAttribute('data-login-status');
+            const isLoggedIn = (loginStatus === 'success');
+            btn.disabled = isLoggedIn;
+            if (isLoggedIn) {
+                if (btn.classList.contains('send-btn')) btn.classList.remove('btn-info');
+                else btn.classList.remove('btn-success');
+                btn.classList.add('btn-secondary');
+            } else {
+                btn.classList.remove('btn-secondary');
+                if (btn.classList.contains('send-btn')) btn.classList.add('btn-info');
+                else btn.classList.add('btn-success');
+            }
+        }
+    });
+    // 同步更新验证码输入框的disabled状态
+    document.querySelectorAll('.code-input').forEach(input => {
+        const row = input.closest('tr');
+        if (row) {
+            const loginStatus = row.getAttribute('data-login-status');
+            input.disabled = (loginStatus === 'success');
+        }
+    });
+}
+
+// 保存单个账号的商品配置（含团队、上传者）
+async function saveAccountConfig(phone) {
+    const row = document.querySelector(`tr[data-phone="${phone}"]`);
+    if (!row) return;
+    const itemNameEl = row.querySelector('.item-name-input');
+    const amountEl = row.querySelector('.amount-input');
+    const teamEl = row.querySelector('.team-input');
+    const uploaderEl = row.querySelector('.uploader-input');
+    const itemName = itemNameEl ? itemNameEl.value.trim() : '';
+    const amount = amountEl ? parseInt(amountEl.value) : 1;
+    const team = teamEl ? teamEl.value.trim() : '';
+    const uploaderName = uploaderEl ? uploaderEl.value.trim() : '';
+    try {
+        const res = await fetch('/api/update_account_config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ phone, item_name: itemName, amount, team, uploader_name: uploaderName })
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('保存失败:', res.status, text);
+            showToast('保存失败(HTTP ' + res.status + '): ' + text.slice(0, 100), 'error');
+            return;
+        }
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(`账号 ${phone} 配置已更新`, 'success');
+            // 同步更新 data-team 属性（筛选依赖此属性）
+            row.setAttribute('data-team', team);
+            // 团队变更后刷新筛选下拉框
+            updateStats();
+        } else {
+            showToast('保存失败: ' + data.message, 'error');
+        }
+    } catch (e) {
+        showToast('网络错误，保存失败', 'error');
+    }
+}
+
+// ===== 定期加载暂停状态 + 代理状态 + 窗口数 + 服务器列表 =====
+function updateRushStatus() {
+    const windowsBadge = document.getElementById('clientWindowsBadge');
+    fetch('/api/rush_status')
+        .then(res => res.json())
+        .then(data => {
+            updatePauseButton(data.rush_paused);
+            updateProxyButton(data.proxy_enabled);
+        })
+        .catch(err => console.error('获取状态失败:', err));
+    fetch('/api/stats')
+        .then(res => res.json())
+        .then(data => {
+            const winCount = data.active_client_windows || 0;
+            const srvCount = data.server_count || 0;
+            if (windowsBadge) {
+                windowsBadge.textContent = `🖥️ ${srvCount}台·${winCount}窗口`;
+                windowsBadge.className = winCount > 0 ? 'badge bg-primary' : 'badge bg-secondary';
+            }
+        })
+        .catch(() => {});
+    // 加载服务器列表
+    loadServerList();
+}
+
+async function loadServerList() {
+    try {
+        const res = await fetch('/api/servers');
+        const data = await res.json();
+        const card = document.getElementById('serverListCard');
+        const tbody = document.getElementById('serverListBody');
+        const refreshTime = document.getElementById('serverRefreshTime');
+        
+        if (!data.servers || data.servers.length === 0) {
+            if (card) card.style.display = 'none';
+            return;
+        }
+        if (card) card.style.display = '';
+        if (refreshTime) refreshTime.textContent = '更新于 ' + new Date().toLocaleTimeString();
+        
+        let html = '';
+        for (const srv of data.servers) {
+            const statusCls = srv.online ? 'success' : 'secondary';
+            const statusText = srv.restarting ? '🔄 重启中' : (srv.online ? '🟢 在线' : '⚫ 离线');
+            const ageText = srv.last_seen_age < 60 ? `${srv.last_seen_age}秒前` : `${Math.floor(srv.last_seen_age/60)}分钟前`;
+            html += `<tr>
+                <td><code>${srv.hostname}</code></td>
+                <td>${srv.ip}</td>
+                <td><b>${srv.windows}</b></td>
+                <td>${srv.tasks}</td>
+                <td class="text-${srv.online ? 'success' : 'muted'}">${ageText}</td>
+                <td><span class="badge bg-${statusCls}">${statusText}</span></td>
+                <td><button class="btn btn-sm btn-outline-danger" onclick="restartServer('${srv.ip}')" ${srv.online ? '' : 'disabled'}>🔁 重启</button></td>
+            </tr>`;
+        }
+        tbody.innerHTML = html;
+    } catch (e) {
+        console.error('加载服务器列表失败:', e);
+    }
+}
+
+async function restartAllServers() {
+    if (!confirm('确定要重启所有在线服务器吗？\n将自动重启服务（systemd 拉起，约5秒完成），无需重启机器。')) return;
+    const btn = document.getElementById('restartServersBtn');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '🔁 发送中...';
+    try {
+        const res = await fetch('/api/client/restart_servers', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        showToast(data.message, data.status === 'success' ? 'success' : 'error');
+    } catch (e) {
+        showToast('网络错误', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
+async function restartServer(ip) {
+    if (!confirm(`确定要重启服务器 ${ip} 吗？\n将自动重启服务（systemd 拉起，约5秒完成），无需重启机器。`)) return;
+    try {
+        const res = await fetch('/api/client/restart_servers', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ip: ip})
+        });
+        const data = await res.json();
+        showToast(data.message, data.status === 'success' ? 'success' : 'error');
+    } catch (e) {
+        showToast('网络错误', 'error');
+    }
+}
+
+setInterval(updateRushStatus, 5000);
+updateRushStatus();
+
+// ===== 不上号筛选功能 =====
+let _excludedTeams = [];
+let _excludedUploaders = [];
+
+async function loadExcludeConfig() {
+    try {
+        const res = await fetch('/api/get_exclude_config');
+        if (!res.ok) return;
+        const data = await res.json();
+        _excludedTeams = data.excluded_teams || [];
+        _excludedUploaders = data.excluded_uploaders || [];
+        updateExcludeBtn();
+    } catch(e) { console.error('加载不上号配置失败:', e); }
+}
+
+function updateExcludeBtn() {
+    const btn = document.getElementById('excludeBtn');
+    const total = _excludedTeams.length + _excludedUploaders.length;
+    btn.textContent = `🚫 不上号(${total})`;
+}
+
+async function openExcludeModal() {
+    // 获取当前表格中所有团队和上传者
+    const teams = new Set();
+    const uploaders = new Set();
+    document.querySelectorAll('.team-input').forEach(el => { const v = el.value.trim(); if (v) teams.add(v); });
+    document.querySelectorAll('.uploader-input').forEach(el => { const v = el.value.trim(); if (v) uploaders.add(v); });
+
+    // 渲染团队列表
+    const teamList = document.getElementById('excludeTeamList');
+    if (teams.size === 0) {
+        teamList.innerHTML = '<span class="text-muted small">暂无团队</span>';
+    } else {
+        teamList.innerHTML = [...teams].sort().map(t =>
+            `<div class="form-check"><input class="form-check-input exclude-team-cb" type="checkbox" value="${t}" id="ext_${t}" ${_excludedTeams.includes(t)?'checked':''}><label class="form-check-label" for="ext_${t}">${t}</label></div>`
+        ).join('');
+    }
+
+    // 渲染上传者列表
+    const uploaderList = document.getElementById('excludeUploaderList');
+    if (uploaders.size === 0) {
+        uploaderList.innerHTML = '<span class="text-muted small">暂无上传者</span>';
+    } else {
+        uploaderList.innerHTML = [...uploaders].sort().map(u =>
+            `<div class="form-check"><input class="form-check-input exclude-uploader-cb" type="checkbox" value="${u}" id="exu_${u}" ${_excludedUploaders.includes(u)?'checked':''}><label class="form-check-label" for="exu_${u}">${u}</label></div>`
+        ).join('');
+    }
+
+    // 绑定勾选事件自动保存
+    teamList.querySelectorAll('.exclude-team-cb').forEach(cb => {
+        cb.addEventListener('change', () => saveExcludeConfig());
+    });
+    uploaderList.querySelectorAll('.exclude-uploader-cb').forEach(cb => {
+        cb.addEventListener('change', () => saveExcludeConfig());
+    });
+
+    new bootstrap.Modal(document.getElementById('excludeModal')).show();
+}
+
+async function saveExcludeConfig() {
+    const teams = [...document.querySelectorAll('.exclude-team-cb:checked')].map(cb => cb.value);
+    const uploaders = [...document.querySelectorAll('.exclude-uploader-cb:checked')].map(cb => cb.value);
+    try {
+        const res = await fetch('/api/set_exclude_config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ excluded_teams: teams, excluded_uploaders: uploaders })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            _excludedTeams = teams;
+            _excludedUploaders = uploaders;
+            updateExcludeBtn();
+        } else {
+            showToast('保存失败: ' + (data.message || ''), 'error');
+        }
+    } catch(e) {
+        showToast('网络错误，保存失败', 'error');
+    }
+}
+
+// 初始化加载不上号配置
+loadExcludeConfig();
+
+// ===== 多用户会话隔离：定期校验 Session 与 URL 身份一致性 =====
+// 防止同一浏览器其他标签页登录不同账号后覆盖 Session Cookie，
+// 导致当前页面 API 调用返回其他用户的数据
+(function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlUser = urlParams.get('user');
+    if (!urlUser) return;  // URL 无 user 参数则跳过
+
+    async function checkSessionIdentity() {
+        try {
+            const res = await fetch('/api/whoami');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.logged_in && data.username && data.username !== urlUser) {
+                // Session 已被其他标签页覆盖！强制跳转到登录页
+                console.warn(`[会话隔离] 检测到身份不一致: URL=${urlUser}, Session=${data.username}，强制退出`);
+                showToast(`⚠️ 检测到跨账号会话冲突：当前页面属于「${urlUser}」但 Session 已被「${data.username}」覆盖。即将跳转到登录页…`, 'error');
+                setTimeout(() => { window.location.href = '/login?conflict=1&expected=' + encodeURIComponent(urlUser); }, 3000);
+            }
+        } catch(e) {
+            // 网络错误忽略
+        }
+    }
+
+    // 每 5 秒检查一次
+    setInterval(checkSessionIdentity, 5000);
+    // 立即执行一次
+    checkSessionIdentity();
+})();
+</script>
+{% endblock %}

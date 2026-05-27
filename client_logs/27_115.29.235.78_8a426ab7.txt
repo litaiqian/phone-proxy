@@ -1,0 +1,204 @@
+[19:58:55.088] [启动] 主机=iZbp15umcrq286jl83jf2aZ | UUID=8a426ab7 | 日志目录=/opt/moutai/logs
+[19:58:55.183] [注册] 窗口=25, UUID=8a426ab7, 任务=1
+[19:58:55.409] [配置] 抢购时间(到达目标站): 20:00:00.000 | 频率: 2ms | 次数: 2/账号/轮 | 窗口: 13轮/每5分钟
+[19:58:55.548] [代理] 已清除所有任务的代理配置，全部直连
+[19:58:55.699] [启动] 代理IP=关闭 | 频率2ms
+[19:58:55.699] [代理] ⚠️ 无代理IP！1个账号走同IP，极易触发CDN限流，建议开启代理
+[19:58:55.699] [任务] 18628877222 | proxy=
+[19:58:55.700] [心跳] 已启动，每10秒上报状态
+[19:58:55.768] [时间同步] 偏差=-1.266s (本地慢于服务器)
+[19:58:55.780] [CDN时钟] HTTP Date=Wed, 27 May 2026 11:58:57 GMT | 补偿后=19:58:57.005 | RTT=6ms
+[19:58:55.780] [CDN时钟] srv来源: 429响应→CDN边缘节点Date头+RTT/2 | CDN节点NTP授时，偏差通常<10ms
+[19:59:46.321] [抢购模式] 获取截止时间...
+[19:59:46.483]   ⚠️ startTimeList 为空，兜底截止时间: 21:00:04 (来源: 客户端窗口定义第13轮结束)
+[19:59:46.484] 📱 模拟浏览商品页面（距抢购12.0秒，目标=20:00:00.000）...
+[20:00:18.711] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:00:32.660] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:00:56.796] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:00:56.796] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:00:56.797] 🔥快抢 | 目标=20:05:00.000 | 18628877222=直连
+[20:00:56.979] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:01:04.731] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:01:08.469] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:01:08.469] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:01:08.469] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:01:08.470] 抢购结果: 0/1成功 | 累计0 | 11.7s
+[20:01:08.592] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:04:48.007] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:05:00.000）...
+[20:05:00.157] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:05:00.216] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:05:00.270] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:05:00.270] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:05:00.271] 🔥快抢 | 目标=20:05:00.000 | 18628877222=直连
+[20:05:00.362] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:05:00.441] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:05:00.500] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:05:00.500] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:05:00.500] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:05:00.501] 抢购结果: 0/1成功 | 累计0 | 0.2s
+[20:05:00.628] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:09:48.014] 📱 模拟浏览商品页面（距抢购12.2秒，目标=20:10:00.000）...
+[20:10:00.226] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:10:00.328] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:10:00.384] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:10:00.384] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:10:00.384] 🔥快抢 | 目标=20:10:00.000 | 18628877222=直连
+[20:10:00.468] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:10:00.531] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:10:00.581] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:10:00.581] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:10:00.581] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:10:00.581] 抢购结果: 0/1成功 | 累计0 | 0.2s
+[20:10:00.710] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:14:48.135] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:15:00.000）...
+[20:15:00.330] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:15:00.384] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:15:00.446] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:15:00.446] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:15:00.446] 🔥快抢 | 目标=20:15:00.000 | 18628877222=直连
+[20:15:00.532] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:15:00.610] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:15:00.680] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:15:00.680] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:15:00.680] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:15:00.681] 抢购结果: 0/1成功 | 累计0 | 0.2s
+[20:15:00.801] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:19:48.259] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:20:00.000）...
+[20:20:00.473] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:20:00.806] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:20:00.930] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:20:00.931] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:20:00.931] 🔥快抢 | 目标=20:20:00.000 | 18628877222=直连
+[20:20:01.241] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:20:01.366] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:20:01.514] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:20:01.514] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:20:01.514] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:20:01.515] 抢购结果: 0/1成功 | 累计0 | 0.6s
+[20:20:01.645] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:24:48.286] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:25:00.000）...
+[20:25:00.543] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:25:00.663] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:25:00.780] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:25:00.780] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:25:00.780] 🔥快抢 | 目标=20:25:00.000 | 18628877222=直连
+[20:25:02.680] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:25:10.406] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:25:16.512] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:25:16.512] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:25:16.512] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:25:16.513] 抢购结果: 0/1成功 | 累计0 | 15.7s
+[20:25:16.667] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:29:48.432] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:30:00.000）...
+[20:30:04.179] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:30:14.865] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:30:21.470] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:30:21.470] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:30:21.471] 🔥快抢 | 目标=20:35:00.000 | 18628877222=代理
+[20:30:30.871] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:30:38.614] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:30:38.763] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:30:38.763] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:30:38.763] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:30:38.763] 抢购结果: 0/1成功 | 累计0 | 17.3s
+[20:30:38.763] [本地IP池] 仅剩0个，后台补充...
+[20:30:38.939] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:34:48.540] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:35:00.000）...
+[20:35:00.777] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:35:00.908] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:35:01.032] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:35:01.032] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:35:01.032] 🔥快抢 | 目标=20:35:00.000 | 18628877222=直连
+[20:35:01.185] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:35:01.318] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:35:01.449] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:35:01.449] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:35:01.449] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:35:01.449] 抢购结果: 0/1成功 | 累计0 | 0.4s
+[20:35:01.449] [本地IP池] 仅剩0个，后台补充...
+[20:35:01.624] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:39:48.549] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:40:00.000）...
+[20:40:19.491] [参数] API调用异常(第1次): Failed to perform, curl: (56) Connection closed abruptly. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:40:19.673] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:40:19.857] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:40:19.857] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:40:19.857] 🔥快抢 | 目标=20:45:00.000 | 18628877222=代理
+[20:40:20.046] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:40:20.207] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:40:20.413] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:40:20.413] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:40:20.413] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:40:20.413] 抢购结果: 0/1成功 | 累计0 | 0.6s
+[20:40:20.413] [本地IP池] 仅剩0个，后台补充...
+[20:40:20.571] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:44:47.713] 📱 模拟浏览商品页面（距抢购12.1秒，目标=20:45:00.000）...
+[20:45:00.758] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:45:18.925] [参数] API调用异常(第2次): Failed to perform, curl: (56) Connection closed abruptly. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:45:19.081] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:45:19.081] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:45:19.081] 🔥快抢 | 目标=20:50:00.000 | 18628877222=直连
+[20:45:19.272] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:45:19.439] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:45:19.615] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:45:19.615] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:45:19.615] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:45:19.615] 抢购结果: 0/1成功 | 累计0 | 0.5s
+[20:45:19.615] [本地IP池] 仅剩0个，后台补充...
+[20:45:19.785] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:49:47.722] 📱 模拟浏览商品页面（距抢购12.7秒，目标=20:50:00.000）...
+[20:50:01.090] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:50:02.149] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:50:08.431] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:50:08.431] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:50:08.431] 🔥快抢 | 目标=20:55:00.000 | 18628877222=代理
+[20:50:08.606] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:50:08.776] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:50:12.324] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:50:12.324] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:50:12.324] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:50:12.324] 抢购结果: 0/1成功 | 累计0 | 3.9s
+[20:50:12.324] [本地IP池] 仅剩0个，后台补充...
+[20:50:12.485] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:54:48.295] 📱 模拟浏览商品页面（距抢购11.7秒，目标=20:55:00.000）...
+[20:55:00.129] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:55:00.307] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:55:00.460] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:55:00.460] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:55:00.460] 🔥快抢 | 目标=20:55:00.000 | 18628877222=直连
+[20:55:00.638] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:55:00.804] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:55:00.979] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[20:55:00.979] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[20:55:00.979] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[20:55:00.979] 抢购结果: 0/1成功 | 累计0 | 0.5s
+[20:55:00.979] [本地IP池] 仅剩0个，后台补充...
+[20:55:01.145] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[20:59:47.851] 📱 模拟浏览商品页面（距抢购12.1秒，目标=21:00:00.000）...
+[21:00:00.248] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[21:00:00.414] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[21:00:00.558] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[21:00:00.558] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[21:00:00.558] 🔥快抢 | 目标=21:00:00.000 | 18628877222=代理
+[21:00:00.728] [参数] API调用异常(第1次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[21:00:00.881] [参数] API调用异常(第2次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[21:00:01.051] [参数] API调用异常(第3次): Failed to perform, curl: (56) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[21:00:01.051] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[21:00:01.051] [18628877222] ❌ 无法获取商品参数，跳过本轮
+[21:00:01.051] 抢购结果: 0/1成功 | 累计0 | 0.5s
+[21:00:01.051] [本地IP池] 仅剩0个，后台补充...
+[21:00:01.210] [日志] 已上传 → 27_115.29.235.78_8a426ab7.txt
+
+[21:15:53.797] ⏰ 已过截止时间 21:00:04，停止所有抢购
+[21:15:58.804] 抢购结束 | 成功:0
