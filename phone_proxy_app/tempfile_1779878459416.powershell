@@ -1,1 +1,0 @@
-cd D:\采购管理\媽媽5; Remove-Item builds\moutai_client_aes_u2.zip -ErrorAction SilentlyContinue; python build_client.py --aes --user-id 2
