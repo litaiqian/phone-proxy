@@ -46,9 +46,11 @@ jobs:
           # 安装 build-tools
           yes | ./cmdline-tools/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk \
             "build-tools;31.0.0" "platforms;android-31" "platform-tools" 2>/dev/null || true
-          # buildozer 用旧路径 tools/bin/sdkmanager，软链接兼容
-          rm -rf tools
-          ln -sf cmdline-tools tools
+          # buildozer 用旧路径 tools/bin/sdkmanager，只软链接 sdkmanager
+          if [ ! -d tools/bin ]; then
+            mkdir -p tools/bin
+            ln -sf ../../cmdline-tools/bin/sdkmanager tools/bin/sdkmanager
+          fi
 
       - name: Build APK
         working-directory: phone_proxy_app
