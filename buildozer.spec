@@ -5,9 +5,9 @@ title = 养猫
 package.name = phone_proxy
 package.domain = top.ipla
 
-# 版本
-version = 1.0.0
-version.code = 1
+# 版本（升级时递增）
+version = 1.0.1
+version.code = 2
 
 # 入口
 source.dir = .
@@ -20,16 +20,29 @@ android.api = 34
 android.minapi = 21
 android.ndk = 25c
 
-# 多架构（适配各种手机）
+# 支持多架构（适配各种手机）
 android.archs = arm64-v8a,armeabi-v7a
 
 # ==================== 依赖 ====================
 requirements = python3,kivy,requests,websocket-client,android
 
-# ==================== 权限 ====================
-android.permissions = INTERNET,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,WAKE_LOCK,ACCESS_NETWORK_STATE,CHANGE_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIFI_STATE,RECEIVE_BOOT_COMPLETED,POST_NOTIFICATIONS,QUERY_ALL_PACKAGES
+# ==================== 必要权限 ====================
+android.permissions = \
+    INTERNET,\
+    FOREGROUND_SERVICE,\
+    FOREGROUND_SERVICE_DATA_SYNC,\
+    WAKE_LOCK,\
+    ACCESS_NETWORK_STATE,\
+    CHANGE_NETWORK_STATE,\
+    ACCESS_WIFI_STATE,\
+    CHANGE_WIFI_STATE,\
+    RECEIVE_BOOT_COMPLETED,\
+    POST_NOTIFICATIONS,\
+    QUERY_ALL_PACKAGES,\
+    READ_PHONE_STATE,\
+    ACCESS_FINE_LOCATION
 
-# ==================== UI ====================
+# ==================== UI 配置 ====================
 orientation = portrait
 icon.filename = %(source.dir)s/icon.png
 android.presplash_color = #FF6B35
