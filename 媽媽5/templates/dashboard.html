@@ -372,11 +372,11 @@
             <div class="card mb-3">
               <div class="card-body py-2">
                 <h6 class="mb-2">➕ 创建团队</h6>
-                <div class="row g-2">
+                <div class="row g-2 align-items-end">
                   <div class="col-md-3"><input type="text" class="form-control form-control-sm" id="newTeamName" placeholder="团队名称"></div>
-                  <div class="col-md-3"><input type="text" class="form-control form-control-sm" id="newTeamUser" placeholder="登录账号"></div>
-                  <div class="col-md-3"><input type="password" class="form-control form-control-sm" id="newTeamPass" placeholder="登录密码"></div>
-                  <div class="col-md-3"><button class="btn btn-info btn-sm w-100" onclick="createTeam()">创建</button></div>
+                  <div class="col-md-4"><input type="text" class="form-control form-control-sm" id="newTeamMembers" placeholder="成员用户ID，逗号分隔（如: 3,5,8）"></div>
+                  <div class="col-md-2"><button class="btn btn-info btn-sm w-100" onclick="createTeam()">创建</button></div>
+                  <div class="col-md-3"><small class="text-muted">成员可在App团队页看到账号</small></div>
                 </div>
               </div>
             </div>
@@ -1072,61 +1072,73 @@ async function loadTeams() {
             container.innerHTML = '<p class="text-muted text-center">暂无团队，请创建</p>';
             return;
         }
-        container.innerHTML = data.teams.map(t => `
+        container.innerHTML = data.teams.map(t => {
+            const memberTags = (t.members || []).map(m =>
+                `<span class="badge bg-secondary me-1" style="cursor:pointer;" title="点击移除" onclick="removeTeamMember(${t.id}, ${m.user_id})">${m.username} ✕</span>`
+            ).join('');
+            return `
             <div class="card mb-2">
               <div class="card-body py-2">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div>
+                <div class="d-flex justify-content-between align-items-start">
+                  <div style="flex:1;">
                     <strong>${t.name}</strong>
-                    <small class="text-muted ms-2">账号: ${t.login_username}</small>
                     <span class="badge bg-info ms-2">${t.account_count} 个账号</span>
-                    <a href="/team/login" target="_blank" class="btn btn-sm btn-outline-secondary ms-2 py-0">🔗 站点</a>
+                    <span class="badge bg-success ms-1">${(t.members||[]).length} 人</span>
+                    <div class="mt-1">${memberTags || '<small class="text-muted">暂无成员</small>'}</div>
                   </div>
-                  <div>
-                    <button class="btn btn-outline-primary btn-sm py-0" onclick="editTeam(${t.id}, '${t.name}', '${t.login_username}', '${t.payment_method||''}')">✏️</button>
+                  <div class="text-nowrap ms-2">
+                    <button class="btn btn-outline-primary btn-sm py-0" onclick="addMemberToTeam(${t.id})">➕成员</button>
                     <button class="btn btn-outline-success btn-sm py-0" onclick="openAssignArea(${t.id}, '${t.name}')">📋分配</button>
                     <button class="btn btn-outline-danger btn-sm py-0" onclick="deleteTeam(${t.id})">🗑️</button>
                   </div>
                 </div>
               </div>
             </div>
-        `).join('');
+        `}).join('');
     } catch(e) { showToast('加载团队失败', 'error'); }
 }
 
 async function createTeam() {
     const name = document.getElementById('newTeamName').value.trim();
-    const login_username = document.getElementById('newTeamUser').value.trim();
-    const password = document.getElementById('newTeamPass').value.trim();
-    if (!name || !login_username || !password) { showToast('请填写完整信息', 'error'); return; }
+    const memberIdsStr = document.getElementById('newTeamMembers').value.trim();
+    if (!name) { showToast('请输入团队名称', 'error'); return; }
+    const member_ids = memberIdsStr ? memberIdsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
     try {
         const res = await fetch('/api/teams', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name, login_username, password})
+            body: JSON.stringify({name, member_ids})
         });
         const data = await res.json();
         if (data.status === 'success') {
             showToast(data.message);
             document.getElementById('newTeamName').value = '';
-            document.getElementById('newTeamUser').value = '';
-            document.getElementById('newTeamPass').value = '';
+            document.getElementById('newTeamMembers').value = '';
             await loadTeams();
             await updateStats();
         } else { showToast(data.message, 'error'); }
     } catch(e) { showToast('网络错误', 'error'); }
 }
 
-async function editTeam(id, name, login_username, payment_method) {
-    const newName = prompt('团队名称:', name);
-    if (!newName || !newName.trim()) return;
-    const newPass = prompt('新密码（留空不修改）:', '');
-    const body = {name: newName.trim()};
-    if (newPass && newPass.trim()) body.password = newPass.trim();
+async function addMemberToTeam(teamId) {
+    const uid = prompt('输入要添加的成员用户ID:');
+    if (!uid) return;
+    const memberId = parseInt(uid.trim());
+    if (isNaN(memberId)) { showToast('请输入有效数字', 'error'); return; }
     try {
-        const res = await fetch(`/api/teams/${id}`, {
-            method: 'PUT', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(body)
+        const res = await fetch(`/api/teams/${teamId}/members`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({member_ids: [memberId]})
         });
+        const data = await res.json();
+        if (data.status === 'success') { showToast(data.message); await loadTeams(); }
+        else { showToast(data.message, 'error'); }
+    } catch(e) { showToast('网络错误', 'error'); }
+}
+
+async function removeTeamMember(teamId, userId) {
+    if (!confirm('确定移除该成员吗？')) return;
+    try {
+        const res = await fetch(`/api/teams/${teamId}/members/${userId}`, {method: 'DELETE'});
         const data = await res.json();
         if (data.status === 'success') { showToast(data.message); await loadTeams(); }
         else { showToast(data.message, 'error'); }

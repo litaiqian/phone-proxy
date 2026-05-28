@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from routes import get_db
-from models import User, PhoneRecord
+from models import User, PhoneRecord, Team, TeamMember, TeamAccount
 
 router = APIRouter(tags=["养猫App"])
 security = HTTPBearer(auto_error=False)
@@ -293,15 +293,59 @@ async def app_bind_account(
 async def app_bind_status(
     user: User = Depends(get_app_user),
     db: Session = Depends(get_db),
+    team_id: int = 0,
 ):
-    """获取当前用户所有已绑定账号的登录状态"""
-    records = (
-        db.query(PhoneRecord)
-        .filter(PhoneRecord.user_id == user.id)
-        .all()
-    )
+    """获取当前用户可见的账号列表（自己的 + 所在团队的）
+    team_id=0 全部，>0 只返回该团队账号"""
+    # 收集用户可见的 phone 集合
+    visible_phones = set()
+    phone_owner_map = {}  # phone -> owner_user_id
+    
+    if team_id > 0:
+        # 只返回指定团队的账号
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if not team:
+            return JSONResponse(content={'ok': True, 'accounts': [], 'device_count': 0})
+        # 检查用户是否是团队成员或 owner
+        is_member = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id, TeamMember.user_id == user.id
+        ).first() is not None
+        is_owner = team.owner_user_id == user.id
+        if not is_member and not is_owner:
+            return JSONResponse(content={'ok': True, 'accounts': [], 'device_count': 0})
+        # 获取团队账号
+        mappings = db.query(TeamAccount).filter(TeamAccount.team_id == team_id).all()
+        for m in mappings:
+            visible_phones.add(m.phone)
+            phone_owner_map[m.phone] = m.owner_user_id
+    else:
+        # 自己的账号
+        own = db.query(PhoneRecord).filter(PhoneRecord.user_id == user.id).all()
+        for r in own:
+            visible_phones.add(r.phone)
+            phone_owner_map[r.phone] = r.user_id
+        # 所在团队分配的账号
+        member_teams = db.query(TeamMember).filter(TeamMember.user_id == user.id).all()
+        team_ids = [mt.team_id for mt in member_teams]
+        if team_ids:
+            mappings = db.query(TeamAccount).filter(TeamAccount.team_id.in_(team_ids)).all()
+            for m in mappings:
+                if m.phone not in visible_phones:
+                    visible_phones.add(m.phone)
+                    phone_owner_map[m.phone] = m.owner_user_id
+    
+    if not visible_phones:
+        return JSONResponse(content={'ok': True, 'accounts': [], 'device_count': 0})
+    
+    records = db.query(PhoneRecord).filter(PhoneRecord.phone.in_(list(visible_phones))).all()
+    
     accounts = []
     for r in records:
+        is_shared = r.user_id != user.id
+        owner_name = ''
+        if is_shared:
+            owner = db.query(User).filter(User.id == r.user_id).first()
+            owner_name = owner.username if owner else str(r.user_id)
         if r.logged_in:
             login_status = 'success'
         elif r.token or r.cookie:
@@ -312,8 +356,23 @@ async def app_bind_status(
             'phone': r.phone,
             'login_status': login_status,
             'account_type': r.account_type or '',
+            'is_shared': is_shared,
+            'owner_name': owner_name,
+            'won': bool(r.bid_result and '中奖' in str(r.bid_result) and '未中奖' not in str(r.bid_result)),
+            'paid': r.pay_status == 'success',
+            'bid_result': r.bid_result or '',
+            'pay_status': r.pay_status or '',
         })
-    return JSONResponse(content={'ok': True, 'accounts': accounts})
+    
+    # 统计活跃设备
+    import time as _time
+    from moutai_automation import active_client_windows, CLIENT_HEARTBEAT_TIMEOUT
+    now_ts = _time.time()
+    device_count = sum(1 for cid, info in active_client_windows.items()
+                       if info.get('uploader_id') == user.id
+                       and now_ts - info.get('last_heartbeat', 0) <= CLIENT_HEARTBEAT_TIMEOUT)
+    
+    return JSONResponse(content={'ok': True, 'accounts': accounts, 'device_count': device_count})
 
 
 # ===================== 刷新绑定登录 =====================
@@ -561,3 +620,77 @@ async def app_notify_won(request: Request, db: Session = Depends(get_db)):
     # 广播中签通知到在线设备
     print(f'[中签推送] 📱 {masked} | {item} | order={order_id}')
     return JSONResponse(content={'ok': True, 'message': f'已推送至 {masked}'})
+
+
+# ===================== 团队列表（App 端只读展示） =====================
+
+@router.get("/api/app/teams")
+async def app_teams(
+    user: User = Depends(get_app_user),
+    db: Session = Depends(get_db),
+):
+    """获取当前用户可见的团队列表（我是 owner 或 member 的团队）
+    每个团队含账号统计：总数、已登录、中奖、已付款、待付款"""
+    # 我创建的团队
+    owned = db.query(Team).filter(Team.owner_user_id == user.id).all()
+    # 我是成员的团队
+    member_team_ids = [
+        mt.team_id for mt in db.query(TeamMember).filter(TeamMember.user_id == user.id).all()
+    ]
+    member_teams = db.query(Team).filter(Team.id.in_(member_team_ids)).all() if member_team_ids else []
+    # 合并去重
+    all_teams = {}
+    for t in owned:
+        all_teams[t.id] = t
+    for t in member_teams:
+        if t.id not in all_teams:
+            all_teams[t.id] = t
+    
+    # 全局汇总
+    all_phones = set()
+    team_list = []
+    for t in all_teams.values():
+        # 获取团队账号
+        mappings = db.query(TeamAccount).filter(TeamAccount.team_id == t.id).all()
+        phones = [m.phone for m in mappings]
+        all_phones.update(phones)
+        
+        records = db.query(PhoneRecord).filter(PhoneRecord.phone.in_(phones)).all() if phones else []
+        login_count = sum(1 for r in records if r.logged_in)
+        won_count = sum(1 for r in records if r.bid_result and '中奖' in str(r.bid_result) and '未中奖' not in str(r.bid_result))
+        paid_count = sum(1 for r in records if r.pay_status == 'success')
+        unpaid_count = won_count - paid_count
+        
+        owner_name = ''
+        if t.owner_user_id:
+            owner = db.query(User).filter(User.id == t.owner_user_id).first()
+            owner_name = owner.username if owner else str(t.owner_user_id)
+        
+        team_list.append({
+            'team_id': t.id,
+            'name': t.name,
+            'owner_name': owner_name,
+            'is_owner': t.owner_user_id == user.id,
+            'account_count': len(records),
+            'login_count': login_count,
+            'won_count': won_count,
+            'paid_count': paid_count,
+            'unpaid_count': unpaid_count,
+        })
+    
+    # 全部汇总
+    all_records = db.query(PhoneRecord).filter(PhoneRecord.phone.in_(list(all_phones))).all() if all_phones else []
+    all_login = sum(1 for r in all_records if r.logged_in)
+    all_won = sum(1 for r in all_records if r.bid_result and '中奖' in str(r.bid_result) and '未中奖' not in str(r.bid_result))
+    all_paid = sum(1 for r in all_records if r.pay_status == 'success')
+    all_unpaid = all_won - all_paid
+    
+    return JSONResponse(content={
+        'ok': True,
+        'teams': team_list,
+        'all_account_count': len(all_records),
+        'all_login_count': all_login,
+        'all_won_count': all_won,
+        'all_paid_count': all_paid,
+        'all_unpaid_count': all_unpaid,
+    })

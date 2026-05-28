@@ -140,15 +140,30 @@ class TaskAssignment(Base):
 
 # ===================== 团队管理表 =====================
 class Team(Base):
-    """团队表：主站用户创建的团队，拥有独立登录凭据"""
+    """团队表：主站用户创建的团队
+    成员通过 TeamMember 关联，账号通过 TeamAccount 分配
+    login_username/password_hash 改为可选（兼容旧团队独立登录）"""
     __tablename__ = 'team'
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    login_username = Column(String(80), unique=True, nullable=False)
-    password_hash = Column(String(256), nullable=False)
+    login_username = Column(String(80), unique=True, nullable=True)    # 可选
+    password_hash = Column(String(256), nullable=True)                 # 可选
     owner_user_id = Column(Integer, ForeignKey('user.id'), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     payment_method = Column(String(50), default='')
+
+
+class TeamMember(Base):
+    """团队成员表：owner 添加其他用户为成员，成员可在 App 团队页看到该团队账号"""
+    __tablename__ = 'team_member'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey('team.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('user.id'), nullable=False, index=True)
+    added_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_team_member', 'team_id', 'user_id', unique=True),
+    )
 
 
 class TeamAccount(Base):
@@ -159,6 +174,21 @@ class TeamAccount(Base):
     phone = Column(String(20), ForeignKey('phone_record.phone'), nullable=False, index=True)
     owner_user_id = Column(Integer, ForeignKey('user.id'), nullable=False, index=True)
     assigned_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class AccountShare(Base):
+    """账号共享表：上传者(user_id)授权其他用户(shared_to)管理其账号
+    共享后，被授权者在App团队列表可见授权者的账号，可用于抢购
+    但只有上传者才能删除账号"""
+    __tablename__ = 'account_share'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey('user.id'), nullable=False, index=True)
+    shared_to_user_id = Column(Integer, ForeignKey('user.id'), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_share_pair', 'owner_user_id', 'shared_to_user_id', unique=True),
+    )
 
 
 # ===================== 保留旧的 GlobalConfig 用于兼容（迁移后废弃）=====================

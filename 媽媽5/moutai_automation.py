@@ -152,9 +152,6 @@ _diag_logged: dict = {}
 # 服务重启日志去重（避免心跳10秒刷屏）
 _server_restart_logged: dict = {}
 
-# 智能回退缓存：记录已回退的 uploader_id → 实际 user_id，避免每次请求都查询数据库
-_fallback_user_cache: dict = {}
-
 # 服务器远程重启标志（按客户端外网 IP 控制，收到指令后随机0~10秒执行服务重启）
 # 客户端心跳检测到 server_restart_required 后 systemctl restart，systemd Restart=always 自动拉起
 # {ip: {"flag": True, "version": int, "trigger_time": float}}
@@ -3353,34 +3350,7 @@ async def client_register(request: Request, db: SQLSession = Depends(get_db)):
     # 兼容多种 account_type 格式：'black' / '成功|黑号' 等都视为黑号
     all_logged_in = [r for r in all_logged_in if not _is_black_account(r.account_type)]
     all_logged_in = _filter_excluded(all_logged_in, cfg)
-    
-    # 智能回退：如果请求的 user_id 没白号，但数据库只有唯一用户有白号，自动使用该用户
-    if len(all_logged_in) == 0 and uploader_id:
-        if uploader_id in _fallback_user_cache:
-            uploader_id = _fallback_user_cache[uploader_id]
-            all_logged_in = db.query(PhoneRecord).filter(
-                PhoneRecord.logged_in == True,
-                PhoneRecord.user_id == uploader_id
-            ).all()
-            all_logged_in = [r for r in all_logged_in if not _is_black_account(r.account_type)]
-        else:
-            from sqlalchemy import func as _func2
-            user_white_counts = db.query(PhoneRecord.user_id, _func2.count(PhoneRecord.phone)).filter(
-                PhoneRecord.logged_in == True,
-                ~PhoneRecord.account_type.contains('黑号')
-            ).group_by(PhoneRecord.user_id).all()
-            if len(user_white_counts) == 1:
-                fallback_uid = user_white_counts[0][0]
-                _fallback_user_cache[uploader_id] = fallback_uid
-                print(f'[智能回退] register uploader_id={uploader_id} 无白号，自动回退到唯一有白号的 user_id={fallback_uid}')
-                uploader_id = fallback_uid
-                all_logged_in = db.query(PhoneRecord).filter(
-                    PhoneRecord.logged_in == True,
-                    PhoneRecord.user_id == uploader_id
-                ).all()
-                all_logged_in = [r for r in all_logged_in if not _is_black_account(r.account_type)]
-                all_logged_in = _filter_excluded(all_logged_in, cfg)
-    
+
     client_ip = request.client.host if request.client else 'unknown'
     
     # 加锁保证注册、窗口分配、账号分配的原子性
@@ -3610,10 +3580,41 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
             cfg = get_user_config(1, db)
         multi_open_count = cfg.multi_open_count or 1
         if uploader_id:
-            all_logged_in = db.query(PhoneRecord).filter(
-                PhoneRecord.logged_in == True,
-                PhoneRecord.user_id == uploader_id
-            ).all()
+            # 自己的账号 + 所在团队分配的账号
+            from models import Team, TeamMember as TM, TeamAccount as TA
+            member_team_ids = [
+                mt.team_id for mt in db.query(TM).filter(TM.user_id == uploader_id).all()
+            ]
+            # 自己上传的 team 也包含（owner 也是成员）
+            owned_team_ids = [
+                t.id for t in db.query(Team).filter(Team.owner_user_id == uploader_id).all()
+            ]
+            all_team_ids = list(set(member_team_ids + owned_team_ids))
+            # 所有团队的账号 phone 集合
+            team_phones = set()
+            if all_team_ids:
+                mappings = db.query(TA).filter(TA.team_id.in_(all_team_ids)).all()
+                team_phones = {m.phone for m in mappings}
+            # 查询：自己的 + 团队账号
+            if team_phones:
+                all_logged_in = db.query(PhoneRecord).filter(
+                    PhoneRecord.logged_in == True,
+                    PhoneRecord.phone.in_(list(team_phones))
+                ).all()
+                # 也包含自己上传的账号（可能不在团队中）
+                own_logged = db.query(PhoneRecord).filter(
+                    PhoneRecord.logged_in == True,
+                    PhoneRecord.user_id == uploader_id
+                ).all()
+                seen = {r.phone for r in all_logged_in}
+                for r in own_logged:
+                    if r.phone not in seen:
+                        all_logged_in.append(r)
+            else:
+                all_logged_in = db.query(PhoneRecord).filter(
+                    PhoneRecord.logged_in == True,
+                    PhoneRecord.user_id == uploader_id
+                ).all()
         else:
             all_logged_in = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True).all()
     except Exception as e:
@@ -3624,33 +3625,7 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
     # 兼容多种 account_type 格式：'black' / '成功|黑号' 等都视为黑号
     all_logged_in = [r for r in all_logged_in if not _is_black_account(r.account_type)]
     all_logged_in = _filter_excluded(all_logged_in, cfg)
-    
-    # 智能回退：如果请求的 user_id 没白号，但数据库只有唯一用户有白号，自动使用该用户
-    if len(all_logged_in) == 0 and uploader_id:
-        if uploader_id in _fallback_user_cache:
-            uploader_id = _fallback_user_cache[uploader_id]
-            all_logged_in = db.query(PhoneRecord).filter(
-                PhoneRecord.logged_in == True,
-                PhoneRecord.user_id == uploader_id
-            ).all()
-            all_logged_in = [r for r in all_logged_in if not _is_black_account(r.account_type)]
-        else:
-            from sqlalchemy import func as _func
-            user_white_counts = db.query(PhoneRecord.user_id, _func.count(PhoneRecord.phone)).filter(
-                PhoneRecord.logged_in == True,
-                ~PhoneRecord.account_type.contains('黑号')
-            ).group_by(PhoneRecord.user_id).all()
-            if len(user_white_counts) == 1:
-                fallback_uid = user_white_counts[0][0]
-                _fallback_user_cache[uploader_id] = fallback_uid
-                print(f'[智能回退] uploader_id={uploader_id} 无白号，自动回退到唯一有白号的 user_id={fallback_uid}')
-                uploader_id = fallback_uid
-                all_logged_in = db.query(PhoneRecord).filter(
-                    PhoneRecord.logged_in == True,
-                    PhoneRecord.user_id == uploader_id
-                ).all()
-                all_logged_in = [r for r in all_logged_in if not _is_black_account(r.account_type)]
-    
+
     # 诊断：白号=0 时输出一次数据库实况（每个 uploader_id 只输出一次）
     if len(all_logged_in) == 0:
         diag_key = f"diag_baihao_{uploader_id}"
@@ -3659,7 +3634,8 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
             total_all = db.query(PhoneRecord).count()
             total_logged = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True).count()
             total_user_logged = db.query(PhoneRecord).filter(
-                PhoneRecord.logged_in == True, PhoneRecord.user_id == uploader_id).count() if uploader_id else total_logged
+                PhoneRecord.logged_in == True, PhoneRecord.phone.in_(list(team_phones) if team_phones else [])).count() if uploader_id and team_phones else (db.query(PhoneRecord).filter(
+                PhoneRecord.logged_in == True, PhoneRecord.user_id == uploader_id).count() if uploader_id else total_logged)
             # 显示账号的用户分布
             from sqlalchemy import func
             user_dist = db.query(PhoneRecord.user_id, func.count(PhoneRecord.phone)).filter(
@@ -3678,6 +3654,16 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
     
     # 加锁保证分配的原子性
     async with client_register_lock:
+        # batch=-1 表示自动分配：找到该 uploader_id 下最小的未使用窗口号
+        if batch == -1:
+            used_batches = set()
+            for cid, info in active_client_windows.items():
+                if info.get('uploader_id') == uploader_id:
+                    used_batches.add(info.get('batch', 0))
+            batch = 0
+            while batch in used_batches:
+                batch += 1
+        
         # 新语义：使用公共分配函数
         assigned_tasks = allocate_tasks_for_window(all_logged_in, multi_open_count, batch)
         
@@ -3715,7 +3701,7 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
     else:
         print(f'[取任务] 🔄 窗口{batch+1} | IP={client_ip} | 下发账号: {phone_list}')
     
-    return JSONResponse(content={'status': 'success', 'tasks': _build_task_response(assigned_tasks, db=db, uploader_id=uploader_id)})
+    return JSONResponse(content={'status': 'success', 'batch': batch, 'tasks': _build_task_response(assigned_tasks, db=db, uploader_id=uploader_id)})
 
 
 @app.post("/api/client/heartbeat")
@@ -3782,10 +3768,15 @@ async def client_heartbeat(request: Request):
             pass
     # 每次心跳顺便清理过期窗口和超时重启追踪
     get_active_client_count()
+    # 统计该 uploader_id 名下有多少活跃设备
+    now_ts = time.time()
+    device_count = sum(1 for cid, info in active_client_windows.items()
+                       if info.get('uploader_id') == uploader_id
+                       and now_ts - info.get('last_heartbeat', 0) <= CLIENT_HEARTBEAT_TIMEOUT)
     # 仅首次心跳打印，后续静默避免刷屏
     if is_new_hb:
         window_no = batch + 1 if batch >= 0 else '?'
-        print(f'[心跳] 🟢 窗口{window_no} 首次连接 | IP={client_ip} | 窗口={ip_win_count}个 | 任务={ip_task_sum}个')
+        print(f'[心跳] 🟢 窗口{window_no} 首次连接 | IP={client_ip} | 窗口={ip_win_count}个 | 任务={ip_task_sum}个 | 该用户设备总数={device_count}台')
     # 返回最新库存状态 + 服务重启指令
     # 检查待处理重启：用户点击按钮时 server_list 为空，等客户端上线后补发
     if _pending_server_restart and _pending_server_restart.get('version', 0) > 0:
@@ -3816,6 +3807,7 @@ async def client_heartbeat(request: Request):
     
     return JSONResponse(content={
         'status': 'success',
+        'device_count': device_count,
         'is_stock_available': is_stock_available,
         'stock_monitoring_active': stock_monitoring_active,
         'server_restart_required': server_restart_req,
@@ -4108,36 +4100,7 @@ async def client_request_replacement_tasks(request: Request, db: SQLSession = De
     # 过滤黑号
     all_white = [r for r in all_white if not _is_black_account(r.account_type)]
     all_white = _filter_excluded(all_white, cfg)
-    
-    # 智能回退：如果请求的 user_id 没白号，但数据库只有唯一用户有白号，自动使用该用户
-    if len(all_white) == 0 and uploader_id:
-        if uploader_id in _fallback_user_cache:
-            uploader_id = _fallback_user_cache[uploader_id]
-            all_white = db.query(PhoneRecord).filter(
-                PhoneRecord.logged_in == True,
-                PhoneRecord.user_id == uploader_id,
-                ~PhoneRecord.bid_result.contains('成功')
-            ).all()
-            all_white = [r for r in all_white if not _is_black_account(r.account_type)]
-            all_white = _filter_excluded(all_white, cfg)
-        else:
-            from sqlalchemy import func as _func3
-            user_white_counts = db.query(PhoneRecord.user_id, _func3.count(PhoneRecord.phone)).filter(
-                PhoneRecord.logged_in == True,
-                ~PhoneRecord.account_type.contains('黑号')
-            ).group_by(PhoneRecord.user_id).all()
-            if len(user_white_counts) == 1:
-                fallback_uid = user_white_counts[0][0]
-                _fallback_user_cache[uploader_id] = fallback_uid
-                print(f'[智能回退] continue uploader_id={uploader_id} 无白号，自动回退到唯一有白号的 user_id={fallback_uid}')
-                uploader_id = fallback_uid
-                all_white = db.query(PhoneRecord).filter(
-                    PhoneRecord.logged_in == True,
-                    PhoneRecord.user_id == uploader_id,
-                    ~PhoneRecord.bid_result.contains('成功')
-                ).all()
-                all_white = [r for r in all_white if not _is_black_account(r.account_type)]
-    
+
     # 过滤掉刚刚成功的号（这些号本窗口已经有了成功的记录）
     available = [r for r in all_white if r.phone not in succeeded_phones]
     
@@ -4439,15 +4402,6 @@ async def client_urgent_replace(request: Request, db: SQLSession = Depends(get_d
         ).all()
         white = [r for r in white if not _is_black_account(r.account_type)]
         white = _filter_excluded(white, cfg)
-
-        if not white and actual_uid in _fallback_user_cache:
-            actual_uid = _fallback_user_cache[actual_uid]
-            white = db.query(PhoneRecord).filter(
-                PhoneRecord.logged_in == True,
-                PhoneRecord.user_id == actual_uid
-            ).all()
-            white = [r for r in white if not _is_black_account(r.account_type)]
-            white = _filter_excluded(white, cfg)
 
         if white:
             r = white[0]
