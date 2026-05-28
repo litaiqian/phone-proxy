@@ -2170,6 +2170,116 @@ async def get_config(user: User = Depends(get_current_user), db: SQLSession = De
     })
 
 
+# ===================== 手机抢购 WS 推送系统 =====================
+from fastapi import WebSocket, WebSocketDisconnect
+
+phone_ws_clients: dict = {}  # {device_id: WebSocket}
+phone_ws_lock = asyncio.Lock()
+phone_ws_uid_map: dict = {}  # {device_id: user_id}
+
+
+async def broadcast_to_phone_device(device_id: str, message: dict):
+    """向指定手机客户端推送消息"""
+    async with phone_ws_lock:
+        ws = phone_ws_clients.get(device_id)
+    if ws:
+        try:
+            await ws.send_text(json.dumps(message, ensure_ascii=False))
+            return True
+        except Exception:
+            async with phone_ws_lock:
+                phone_ws_clients.pop(device_id, None)
+                phone_ws_uid_map.pop(device_id, None)
+    return False
+
+
+async def broadcast_phone_status_to_user(user_id: int, status_data: dict):
+    """向指定用户的所有手机设备推送状态变更"""
+    async with phone_ws_lock:
+        targets = [did for did, uid in phone_ws_uid_map.items() if uid == user_id]
+    for did in targets:
+        await broadcast_to_phone_device(did, {'type': 'status_change', **status_data})
+
+
+@app.websocket("/api/phone_proxy/ws")
+async def phone_proxy_websocket(websocket: WebSocket):
+    await websocket.accept()
+    device_id = None
+    user_id = 0
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            msg_type = msg.get('type', '')
+
+            if msg_type == 'register':
+                device_id = msg.get('device_id', '')
+                mode = msg.get('mode', '')
+                name = msg.get('name', '')
+
+                if mode != 'rush_client':
+                    await websocket.close(1008, "invalid mode")
+                    return
+
+                user_id = msg.get('user_id', 0)
+
+                async with phone_ws_lock:
+                    phone_ws_clients[device_id] = websocket
+                    if user_id:
+                        phone_ws_uid_map[device_id] = user_id
+
+                # 查询当前用户的手机抢购状态，注册时一并下发
+                status_data = {'phone_rush_enabled': 0, 'rush_paused': 0}
+                if user_id:
+                    try:
+                        db2 = next(get_db())
+                        cfg2 = get_user_config(user_id, db2)
+                        status_data = {
+                            'phone_rush_enabled': getattr(cfg2, 'phone_rush_enabled', 0),
+                            'rush_paused': getattr(cfg2, 'rush_paused', 0),
+                        }
+                        db2.close()
+                    except Exception:
+                        pass
+
+                await websocket.send_text(json.dumps({
+                    'type': 'registered',
+                    'tunnel_id': device_id,
+                    'status': status_data,
+                }, ensure_ascii=False))
+                print(f'[手机WS] {name} 已注册 | device={device_id} | uid={user_id}')
+
+            elif msg_type == 'rush_result':
+                print(f'[手机WS] 抢购结果: {msg.get("round_id", "")} | {len(msg.get("results", []))}条')
+
+            elif msg_type == 'rush_logs':
+                print(f'[手机WS] 抢购日志: {msg.get("round_id", "")} | {len(msg.get("logs", ""))}字符')
+
+            elif msg_type == 'ip_changed':
+                print(f'[手机WS] IP变更: {msg.get("old_ip", "")} → {msg.get("new_ip", "")}')
+
+            elif msg_type == 'pong':
+                pass
+
+            elif msg_type == 'ping':
+                # 客户端心跳保活 → 回复pong
+                await websocket.send_text(json.dumps({'type': 'pong'}, ensure_ascii=False))
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f'[手机WS] 异常: {e}')
+    finally:
+        if device_id:
+            async with phone_ws_lock:
+                phone_ws_clients.pop(device_id, None)
+                phone_ws_uid_map.pop(device_id, None)
+            print(f'[手机WS] {device_id} 断开')
+
+
 @app.post("/api/set_config")
 async def set_config(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
     data = await request.json()
@@ -2202,6 +2312,12 @@ async def set_config(request: Request, user: User = Depends(get_current_user), d
     if 'phone_rush_enabled' in data: cfg.phone_rush_enabled = int(data['phone_rush_enabled'])
     if 'phone_device_assign' in data: cfg.phone_device_assign = str(data['phone_device_assign'])
     db.commit()
+    # === 实时推送：手机抢购状态变更 → 所有已连接手机设备 ===
+    if 'phone_rush_enabled' in data or 'rush_paused' in data:
+        asyncio.create_task(broadcast_phone_status_to_user(user.id, {
+            'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0),
+            'rush_paused': getattr(cfg, 'rush_paused', 0),
+        }))
     return JSONResponse(content={'status': 'success'})
 
 
