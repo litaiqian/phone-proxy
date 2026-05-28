@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+{% block title %}控制台{% endblock %}
+{% block content %}
+<div class="container-fluid">
+
+    <!-- 顶部 Toast 消息容器 -->
+    <div aria-live="polite" aria-atomic="true" class="position-relative">
+        <div class="position-fixed top-0 end-0 p-3" style="z-index: 1100; right: 20px; top: 70px;" id="toastContainer"></div>
+    </div>
+
+    <!-- ===== 顶部统计条 + 导入导出 + 核心按钮 ===== -->
+    <div class="row align-items-center bg-light rounded shadow-sm p-2 mb-3">
+    <!-- 左侧：统计项 + 导入/导出 -->
+    <div class="col-md-8 d-flex align-items-center flex-wrap gap-3">
+        <span class="fw-bold">📊 统计</span>
+        <span>总账号：<b id="stat-total">0</b></span>
+        <span class="text-success">✅ 成功登录：<b id="stat-login">0</b></span>
+        <span class="text-danger">❌ 掉线：<b id="stat-offline">0</b></span>
+        <span class="text-success">🏆 中标：<b id="stat-bid">0</b></span>
+        <span class="text-secondary">😴 未登录：<b id="stat-never">0</b></span>
+        <span class="text-info">💰 支付二维码：<b id="stat-qrcode">0</b></span>
+
+        <!-- 导入/导出按钮组（移到统计项后面，留出间距） -->
+        <div class="input-group input-group-sm ms-3" style="width: auto;">
+
+            <input type="file" id="excelFile" class="form-control form-control-sm" accept=".xlsx,.xls" style="max-width: 160px;">
+            <button class="btn btn-outline-primary btn-sm" onclick="uploadExcel()">📥 导入</button>
+        </div>
+        <a href="{{ url_for('export_data') }}" class="btn btn-outline-secondary btn-sm">📤 导出</a>
+    </div>
+
+    <!-- 右侧：其他操作按钮 -->
+    <div class="col-md-4 d-flex justify-content-end align-items-center gap-2">
+
+
+            <!-- 新增：自动刷新间隔设置 -->
+{#            <span class="ms-2">⏱️ 自动刷新登录：</span>#}
+            <input type="number" id="autoRefreshSec" value="30" min="5" max="300" step="1" style="width: 70px;" class="form-control form-control-sm d-inline-block">
+            <span>秒</span>
+            <button class="btn btn-outline-secondary btn-sm" id="setAutoRefreshBtn">设置</button>
+            <button class="btn btn-danger btn-sm" id="refreshLoginBtn">🔄 刷新登录</button>
+            <button class="btn btn-info btn-sm" id="queryBidBtn">🏆 查询中标结果</button>
+
+        <button class="btn btn-warning btn-sm" id="clearAllBtn" onclick="if(confirm('确定要删除所有账号吗？')) clearAllRecords()">🗑️ 清空</button>
+    </div>
+</div>
+
+    <!-- ===== 全局配置卡片（抢购时间、批量发送、自动模式） ===== -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row align-items-end">
+    <!-- 1. 自动接收验证码 -->
+    <div class="col-md-3">
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="autoModeSwitch">
+            <label class="form-check-label fw-bold">🤖 自动收、发验证码（依赖App）</label>
+        </div>
+        <!-- 占位，保持高度一致 -->
+        <div style="height: 32px;"></div>
+    </div>
+
+    <!-- 2. 自动开始时间 -->
+    <div class="col-md-3">
+        <label class="fw-bold">🕒 自动登录</label>
+        <input type="time" id="autoStartTime" class="form-control form-control-sm" value="08:00">
+    </div>
+
+    <!-- 3. 抢购时间 -->
+    <div class="col-md-3">
+        <label class="fw-bold">⏰ 购买时间（时:分）</label>
+        <div class="input-group input-group-sm">
+            <input type="number" id="rushHour" class="form-control" min="0" max="23" value="8" style="width:70px">
+            <span class="input-group-text">:</span>
+            <input type="number" id="rushMinute" class="form-control" min="0" max="59" value="58" style="width:70px">
+            <button class="btn btn-primary btn-sm" id="saveRushTime">保存</button>
+        </div>
+    </div>
+
+    <!-- 4. 批量发送间隔 -->
+    <div class="col-md-3">
+        <label class="fw-bold">⏱️ 一键发送验证码</label>
+        <div class="input-group input-group-sm">
+            <input type="number" id="minDelay" class="form-control" value="10" min="1" placeholder="最小">
+            <span class="input-group-text">~</span>
+            <input type="number" id="maxDelay" class="form-control" value="20" min="2" placeholder="最大">
+            <button class="btn btn-danger btn-sm" id="batchSendBtn">⚡ 一键发送</button>
+        </div>
+    </div>
+</div>
+
+    <!-- ===== 号码数据表格 ===== -->
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+            <thead style="background-color: #f8f9fa; color: #000000;">  <!-- 表头黑色背景 -->
+                <tr>
+                    <th>团队</th><th>上传者</th><th>手机号</th>
+                    <th>操作</th><th>登录状态</th><th>中标结果</th><th>支付二维码</th><th>账户余额</th>
+                </tr>
+            </thead>
+            <tbody id="recordBody">
+                {% for rec in records %}
+                <tr data-phone="{{ rec.phone }}" data-login-status="{% if rec.logged_in %}success{% elif rec.token or rec.cookie %}offline{% else %}never{% endif %}">
+                    <td class="team-cell">{{ rec.team }}</td>
+                    <td class="uploader-cell">
+                        {% set uploader = User.query.get(rec.uploaded_by) %}
+                        {{ uploader.username if uploader else '未知' }}
+                    </td>
+                    <td>{{ rec.phone }}</td>
+                    <td>
+                        <button class="btn btn-info btn-sm send-btn" data-phone="{{ rec.phone }}">发送短信</button>
+                        <input type="text" class="form-control form-control-sm d-inline-block w-50 code-input" placeholder="验证码">
+                        <button class="btn btn-success btn-sm submit-btn" data-phone="{{ rec.phone }}">提交验证码</button>
+                    </td>
+                    <td class="status-cell">
+                        {% if rec.logged_in %}
+                        <span class="text-success fw-bold">成功</span>
+                        {% else %}
+                        <span class="text-danger fw-bold">掉线</span>
+                        {% endif %}
+                    </td>
+                    <td class="qrcode-cell">
+                        <span class="qrcode-placeholder" data-phone="{{ rec.phone }}">
+                            <!-- 如果二维码存在则显示图片，否则显示“未生成” -->
+                        </span>
+                    </td>
+
+                    <td class="bid-cell">{{ rec.bid_result }}</td>
+                    <td class="balance-cell">{{ rec.balance }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 不再使用中标结果模态框，已删除 -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---------- 全局 Toast 函数 ----------
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    const toastId = 'toast-' + Date.now();
+    const bgClass = type === 'success' ? 'bg-success' : (type === 'error' ? 'bg-danger' : 'bg-warning');
+    const html = `
+        <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0 mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="3000">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+    const toastEl = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastEl, { autohide: true, delay: 3000 });
+    toast.show();
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+}
+
+// ---------- 清空所有账号 ----------
+async function clearAllRecords() {
+    const res = await fetch('/api/clear_all_records', {method: 'POST'});
+    const data = await res.json();
+    showToast(data.message, data.status === 'success' ? 'success' : 'error');
+    if (data.status === 'success') location.reload();
+}
+//=============================== JavaScript 动态加载二维码（支付宝二维码）================
+async function loadQRCodes() {
+    document.querySelectorAll('.qrcode-placeholder').forEach(placeholder => {
+        const phone = placeholder.dataset.phone;
+        const imgUrl = `/qrcode/${phone}`;
+        fetch(imgUrl, { method: 'HEAD' }).then(res => {
+            if (res.ok) {
+                placeholder.innerHTML = `<img src="${imgUrl}" width="100" height="100" class="img-thumbnail" title="支付二维码" style="cursor:pointer" data-bs-toggle="modal" data-bs-target="#qrModal" data-img="${imgUrl}">`;
+            } else {
+                placeholder.innerHTML = '<span class="text-muted small">未支付</span>';
+            }
+        }).catch(() => {
+            placeholder.innerHTML = '<span class="text-muted small">加载失败</span>';
+        });
+    });
+}
+
+// 可选：点击图片放大模态框（添加一个全局模态框）
+// 在页面底部添加模态框 HTML（略）
+
+// ---------- 全局配置加载 ----------
+function loadGlobalConfig() {
+    fetch('/api/get_config')
+        .then(res => res.json())
+        .then(cfg => {
+            document.getElementById('rushHour').value = cfg.rush_hour;
+            document.getElementById('rushMinute').value = cfg.rush_minute;
+            document.getElementById('autoModeSwitch').checked = cfg.auto_mode_enabled;
+            document.getElementById('autoStartTime').value = cfg.auto_start_time;
+        });
+}
+loadGlobalConfig();
+
+// 保存抢购时间
+document.getElementById('saveRushTime').onclick = () => {
+    const rush_hour = parseInt(document.getElementById('rushHour').value);
+    const rush_minute = parseInt(document.getElementById('rushMinute').value);
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rush_hour, rush_minute})
+    }).then(() => showToast('抢购时间已保存'));
+};
+
+// 自动模式开关
+document.getElementById('autoModeSwitch').onchange = (e) => {
+    const auto_mode_enabled = e.target.checked;
+    const auto_start_time = document.getElementById('autoStartTime').value;
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({auto_mode_enabled, auto_start_time})
+    }).then(() => showToast('自动模式设置已保存'));
+};
+
+// 导入Excel
+function uploadExcel() {
+    const file = document.getElementById('excelFile').files[0];
+    if (!file) return showToast('请选择Excel文件', 'error');
+    const formData = new FormData();
+    formData.append('file', file);
+    fetch('/api/upload', {method: 'POST', body: formData})
+        .then(res => res.json())
+        .then(data => {
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+            if(data.status === 'success') location.reload();
+        })
+        .catch(err => showToast('上传失败', 'error'));
+}
+
+// 批量发送验证码
+document.getElementById('batchSendBtn').onclick = async () => {
+    const min = parseInt(document.getElementById('minDelay').value);
+    const max = parseInt(document.getElementById('maxDelay').value);
+    if (min > max) return showToast('最小间隔不能大于最大间隔', 'error');
+    const res = await fetch('/api/batch_send_code', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({min_delay: min, max_delay: max})
+    });
+    const data = await res.json();
+    showToast(data.message, data.status === 'success' ? 'success' : 'error');
+};
+
+// 绑定单个发送/提交事件
+function bindRowEvents() {
+    document.querySelectorAll('.send-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const phone = btn.dataset.phone;
+            const res = await fetch('/api/send_code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({phone})
+            });
+            const data = await res.json();
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+        };
+    });
+    document.querySelectorAll('.submit-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const phone = btn.dataset.phone;
+            const codeInput = btn.parentElement.querySelector('.code-input');
+            const code = codeInput.value.trim();
+            if (!code) return showToast('请输入验证码', 'error');
+            const res = await fetch('/api/submit_code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({phone, code})
+            });
+            const data = await res.json();
+            showToast(data.message, data.status === 'success' ? 'success' : 'error');
+            if (data.status === 'success') refreshAllData();
+        };
+    });
+}
+
+// 刷新登录状态（核心）
+async function refreshLoginStatus() {
+    const res = await fetch('/api/refresh_login', {method: 'POST'});
+    if (!res.ok) {
+        showToast('会话已过期，请重新登录', 'error');
+        window.location.href = '/login';
+        return;
+    }
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+        showToast('服务器返回异常，可能未登录', 'error');
+        return;
+    }
+    const data = await res.json();
+    console.log('响应数据:', data);
+    if (data.status === 'success') {
+        for (const [phone, info] of Object.entries(data.results)) {
+            const row = document.querySelector(`tr[data-phone="${phone}"]`);
+            if (row) {
+                const statusCell = row.querySelector('.status-cell');
+                const status_desc = info.status_desc;
+                let html = '';
+                if (status_desc === 'success') {
+                    html = '<span class="text-success fw-bold">成功</span>';
+                } else if (status_desc === 'offline') {
+                    html = '<span class="text-danger fw-bold">掉线</span>';
+                } else {
+                    html = '<span class="text-secondary fw-bold">未登录</span>';
+                }
+                statusCell.innerHTML = html;
+                // 将状态存入行的自定义属性，供按钮控制使用
+                row.setAttribute('data-login-status', status_desc);
+            } else {
+                console.warn(`未找到手机号 ${phone} 对应的行`);
+            }
+        }
+        await updateStats();
+        updateSendButtons();   // 刷新按钮禁用状态
+        showToast('登录状态已刷新', 'success');
+    } else {
+        showToast('刷新失败', 'error');
+    }
+}
+
+// 更新统计数字
+async function updateStats() {
+    const res = await fetch('/api/stats');
+    const stats = await res.json();
+    document.getElementById('stat-total').innerText = stats.total;
+    document.getElementById('stat-login').innerText = stats.success_login;
+    document.getElementById('stat-offline').innerText = stats.offline;
+    document.getElementById('stat-never').innerText = stats.never_login;
+    document.getElementById('stat-bid').innerText = stats.bid_success;
+    document.getElementById('stat-qrcode').innerText = stats.qrcode_count;
+}
+
+// 查询所有中标结果（实时获取，直接更新表格）
+async function queryAllBidResults() {
+    const res = await fetch('/api/query_bid_results', {method: 'POST'});
+    const data = await res.json();
+    if (data.status === 'success') {
+        for (const [phone, result] of Object.entries(data.results)) {
+            const row = document.querySelector(`tr[data-phone="${phone}"]`);
+            if (row) {
+                const bidCell = row.querySelector('.bid-cell');
+                const balanceCell = row.querySelector('.balance-cell');
+                if (bidCell) bidCell.innerText = result.bid_result || '';
+                if (balanceCell) balanceCell.innerText = result.balance || '';
+            }
+        }
+        await updateStats();
+        showToast('中标结果已更新', 'success');
+    } else {
+        showToast('查询失败', 'error');
+    }
+}
+
+// 刷新所有数据（登录状态+统计）
+async function refreshAllData() {
+    await refreshLoginStatus();
+}
+
+// 按钮绑定
+document.getElementById('refreshLoginBtn').onclick = refreshAllData;
+document.getElementById('queryBidBtn').onclick = queryAllBidResults;
+
+
+
+// 初始加载
+refreshAllData();
+bindRowEvents();
+
+// 根据登录状态禁用发送按钮
+function updateSendButtons() {
+    document.querySelectorAll('.send-btn').forEach(btn => {
+        const phone = btn.dataset.phone;
+        const row = document.querySelector(`tr[data-phone="${phone}"]`);
+        if (row) {
+            const loginStatus = row.getAttribute('data-login-status');
+            const isLoggedIn = (loginStatus === 'success');
+            btn.disabled = isLoggedIn;                     // 成功后禁用发送按钮
+            if (isLoggedIn) btn.classList.add('btn-secondary');
+            else btn.classList.remove('btn-secondary');
+        }
+    });
+}
+// --- 自动刷新相关 ---
+let autoRefreshIntervalId = null;
+
+// 停止自动刷新
+function stopAutoRefresh() {
+    if (autoRefreshIntervalId) {
+        clearInterval(autoRefreshIntervalId);
+        autoRefreshIntervalId = null;
+        console.log('已停止自动刷新');
+    }
+}
+
+// 启动自动刷新（间隔单位：秒）
+function startAutoRefresh(intervalSeconds) {
+    stopAutoRefresh(); // 先停止旧的
+    if (!intervalSeconds || intervalSeconds <= 0) {
+        console.log('自动刷新已禁用（间隔 <= 0）');
+        return;
+    }
+    const intervalMs = intervalSeconds * 1000;
+    autoRefreshIntervalId = setInterval(() => {
+        console.log(`自动刷新触发 (间隔 ${intervalSeconds} 秒)`);
+        refreshLoginStatus();  // 仅刷新登录状态，不额外统计（因为 refreshLoginStatus 内部会调用 updateStats）
+    }, intervalMs);
+    console.log(`已启动自动刷新，间隔 ${intervalSeconds} 秒`);
+}
+
+// 保存设置到 localStorage 并重启定时器
+function setAutoRefreshFromInput() {
+    let sec = parseInt(document.getElementById('autoRefreshSec').value);
+    if (isNaN(sec)) sec = 30;
+    sec = Math.min(300, Math.max(5, sec)); // 限制 5~300 秒
+    document.getElementById('autoRefreshSec').value = sec;
+    localStorage.setItem('autoRefreshIntervalSec', sec);
+    startAutoRefresh(sec);
+}
+
+// 页面加载时读取保存的间隔（默认30秒）
+function loadAutoRefreshSetting() {
+    {#let savedSec = localStorage.getItem('autoRefreshIntervalSec');#}
+    {#if (savedSec === null) savedSec = 30;#}
+    {#else savedSec = parseInt(savedSec);#}
+    {#if (isNaN(savedSec)) savedSec = 30;#}
+    {#savedSec = Math.min(300, Math.max(5, savedSec));#}
+    {#document.getElementById('autoRefreshSec').value = savedSec;#}
+    {#startAutoRefresh(savedSec);#}
+    console.log('自动刷新已禁用，请手动点击刷新按钮');
+}
+
+// 绑定设置按钮事件
+document.getElementById('setAutoRefreshBtn').onclick = () => {
+    setAutoRefreshFromInput();
+    showToast(`自动刷新间隔已设为 ${document.getElementById('autoRefreshSec').value} 秒`, 'success');
+};
+
+// 初始化加载自动刷新设置
+loadAutoRefreshSetting();
+</script>
+{% endblock %}

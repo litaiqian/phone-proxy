@@ -1,0 +1,7 @@
+Flask==2.3.3
+Flask-Login==0.6.2
+Flask-SQLAlchemy==3.0.5
+pandas==2.1.1
+openpyxl==3.1.2
+requests==2.31.0
+Werkzeug==2.3.8

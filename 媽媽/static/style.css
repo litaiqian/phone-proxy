@@ -1,0 +1,29 @@
+/* static/style.css */
+/* 自定义样式补充 */
+
+/* 状态文字颜色增强 */
+.status-success {
+    color: green;
+    font-weight: bold;
+}
+.status-fail {
+    color: red;
+    font-weight: bold;
+}
+
+/* 表格内操作区紧凑排列 */
+.table .form-control-sm {
+    width: 80px;
+    display: inline-block;
+    margin: 0 2px;
+}
+
+/* 发送/提交按钮间距 */
+.btn-sm {
+    margin: 0 2px;
+}
+
+/* 导航栏用户信息 */
+.navbar-text {
+    color: #fff;
+}
