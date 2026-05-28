@@ -85,13 +85,23 @@
     <!-- ===== 全局配置卡片（抢购时间、多开设置、代理） ===== -->
     <div class="card mb-3">
         <div class="card-body">
-            <div class="row justify-content-start align-items-center" style="gap: 30px;">
-                <!-- 抢购模式开关 -->
+            <div class="row justify-content-start align-items-center" style="gap: 30px;">                <!-- 抢购模式开关 -->
                 <div class="col-auto">
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="rushModeSwitch" onchange="saveRushMode(this.checked)">
                         <label class="form-check-label fw-bold" for="rushModeSwitch" style="font-size:0.85rem;">🛒 抢购模式</label>
                     </div>
+                </div>
+                <!-- 手机抢购开关 -->
+                <div class="col-auto">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="phoneRushSwitch" onchange="savePhoneRush(this.checked)">
+                        <label class="form-check-label fw-bold" for="phoneRushSwitch" style="font-size:0.85rem;">📱 手机抢购</label>
+                    </div>
+                </div>
+                <!-- 重置手机按钮 -->
+                <div class="col-auto">
+                    <button class="btn btn-sm btn-outline-danger" onclick="resetPhoneDevices()" title="重置所有手机设备，下次心跳重新拉取数据" style="font-weight:bold;">重置手机</button>
                 </div>
                 <!-- 间隔模式开关（抢购时间前面） -->
                 <div class="col-auto">
@@ -177,6 +187,23 @@
                     <tbody id="serverListBody"></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- ===== 手机设备状态卡片 ===== -->
+    <div class="card mb-3" id="phoneDeviceCard">
+        <div class="card-header d-flex justify-content-between align-items-center py-1 bg-light">
+            <span class="fw-bold">📱 手机设备状态</span>
+            <div class="d-flex gap-2 align-items-center">
+                <small>在线：<b id="phoneOnlineCount">0</b></small>
+                <small class="text-success">已布置：<b id="phoneDeployedCount">0</b></small>
+                <small class="text-warning">待布置：<b id="phonePendingCount">0</b></small>
+                <button class="btn btn-sm btn-outline-danger ms-2" onclick="resetPhoneDevices()" title="重置所有手机设备，下次心跳重新拉取数据">重置手机</button>
+                <small class="text-muted" id="phoneRefreshTime"></small>
+            </div>
+        </div>
+        <div class="card-body py-2" id="phoneDeviceBody">
+            <p class="text-muted text-center">暂无手机设备在线</p>
         </div>
     </div>
 
@@ -531,6 +558,10 @@ function loadGlobalConfig() {
                 document.getElementById('intervalModeSwitch').checked = cfg.interval_mode === 1;
                 updateIntervalModeLabel(cfg.interval_mode === 1);
             }
+            if (cfg.phone_rush_enabled !== undefined) {
+                document.getElementById('phoneRushSwitch').checked = cfg.phone_rush_enabled === 1;
+                updatePhoneRushLabel(cfg.phone_rush_enabled === 1);
+            }
             if (cfg.min_delay !== undefined && document.getElementById('minDelay')) {
                 document.getElementById('minDelay').value = cfg.min_delay;
             }
@@ -593,6 +624,36 @@ function updateRushModeLabel(enabled) {
         label.style.fontWeight = 'bold';
     } else {
         label.style.color = '#6c757d';
+        label.style.fontWeight = 'bold';
+    }
+}
+
+// 手机抢购开关
+function savePhoneRush(enabled) {
+    updatePhoneRushLabel(enabled);
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ phone_rush_enabled: enabled ? 1 : 0 })
+    }).then(res => res.json()).then(result => {
+        if (result.status === 'success') {
+            showToast(enabled ? '📱 手机抢购已开启 → 客户端将接收抢购数据' : '📱 手机抢购已关闭 → 客户端无数据返回');
+        }
+    }).catch(err => {
+        showToast('保存失败，请重试', 'error');
+        document.getElementById('phoneRushSwitch').checked = !enabled;
+        updatePhoneRushLabel(!enabled);
+    });
+}
+
+function updatePhoneRushLabel(enabled) {
+    const label = document.querySelector('label[for="phoneRushSwitch"]');
+    if (!label) return;
+    if (enabled) {
+        label.style.color = '#0d6efd';  // 蓝色
+        label.style.fontWeight = 'bold';
+    } else {
+        label.style.color = '#6c757d';  // 灰色
         label.style.fontWeight = 'bold';
     }
 }
@@ -1521,5 +1582,96 @@ loadExcludeConfig();
     // 立即执行一次
     checkSessionIdentity();
 })();
+
+// ===== 手机设备状态刷新 =====
+async function refreshPhoneDevices() {
+    try {
+        const res = await fetch('/api/phone/dashboard');
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        document.getElementById('phoneOnlineCount').textContent = data.online_count;
+        document.getElementById('phoneDeployedCount').textContent = data.deployed_count;
+        document.getElementById('phonePendingCount').textContent = data.pending_count;
+        
+        const now = new Date();
+        document.getElementById('phoneRefreshTime').textContent = 
+            now.toTimeString().substring(0, 8);
+        
+        const body = document.getElementById('phoneDeviceBody');
+        if (data.devices.length === 0) {
+            body.innerHTML = '<p class="text-muted text-center">暂无手机设备在线</p>';
+            return;
+        }
+        let html = '<div class="table-responsive"><table class="table table-sm table-bordered mb-0">';
+        html += '<thead class="table-light"><tr><th>设备ID</th><th>机型</th><th>状态</th><th>账号数</th><th>最后心跳</th><th>操作</th></tr></thead><tbody>';
+        
+        for (const d of data.devices) {
+            const statusIcon = d.status === 'deployed' ? '✅ 已布置' : '⏳ 待布置';
+            const statusColor = d.status === 'deployed' ? 'text-success' : 'text-warning';
+            const brand = (d.device_info && d.device_info.brand || '');
+            const model = (d.device_info && d.device_info.model || '');
+            const deviceModel = [brand, model].filter(Boolean).join(' ') || '未知';
+            const elapsed = Math.round((Date.now()/1000) - d.last_heartbeat);
+            
+            html += `<tr>
+                <td><code>${d.device_id}</code></td>
+                <td>${deviceModel}</td>
+                <td class="${statusColor}">${statusIcon}</td>
+                <td>${d.account_count}</td>
+                <td>${elapsed}s前</td>
+                <td><button class="btn btn-outline-primary btn-sm" onclick="assignToDevice('${d.device_id}')">📋 分配</button></td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+    } catch(e) {
+        console.error('phone devices refresh error:', e);
+    }
+}
+
+async function resetPhoneDevices() {
+    if (!confirm('确认重置所有手机设备？\n\n所有手机将在下次心跳时重新拉取数据并重新布置。')) return;
+    try {
+        const res = await fetch('/api/phone/reset', { method: 'POST' });
+        const text = await res.text();
+        console.log('reset response status:', res.status, 'body:', text);
+        let data;
+        try { data = JSON.parse(text); } catch(e) { data = {raw: text}; }
+        if (data.status === 'success') {
+            showToast(data.message, 'success');
+            refreshPhoneDevices();
+        } else {
+            showToast(data.message || data.detail || ('HTTP ' + res.status + ': ' + text.substring(0, 100)), 'error');
+        }
+    } catch(e) {
+        showToast('网络错误: ' + e.message, 'error');
+        console.error('reset error:', e);
+    }
+}
+
+function assignToDevice(deviceId) {
+    const phones = prompt('输入要分配给该设备的手机号（逗号分隔）：\n留空=取消分配');
+    if (phones === null) return;  // 取消
+    const phoneList = phones.trim() ? phones.split(',').map(p => p.trim()).filter(Boolean) : [];
+    fetch('/api/phone/assign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({device_id: deviceId, phones: phoneList})
+    }).then(res => res.json()).then(data => {
+        if (data.status === 'success') {
+            showToast(data.message, 'success');
+            refreshPhoneDevices();
+        } else {
+            showToast(data.message || '分配失败', 'error');
+        }
+    }).catch(e => {
+        showToast('网络错误', 'error');
+    });
+}
+
+// 每10秒刷新手机设备列表
+setInterval(refreshPhoneDevices, 10000);
+refreshPhoneDevices();
 </script>
 {% endblock %}

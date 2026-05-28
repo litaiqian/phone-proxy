@@ -466,12 +466,12 @@ class TaskAssignment(Base):
 
 # ===================== 团队管理模型 =====================
 class Team(Base):
-    """团队表：主站用户创建的团队，拥有独立登录凭据"""
+    """团队表：主站用户创建的团队，通过 owner_user_id 管理成员"""
     __tablename__ = 'team'
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    login_username = Column(String(80), unique=True, nullable=False)
-    password_hash = Column(String(256), nullable=False)
+    login_username = Column(String(80), unique=True, nullable=True)    # 可选（旧版兼容）
+    password_hash = Column(String(256), nullable=True)                # 可选（旧版兼容）
     owner_user_id = Column(Integer, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     # 支付方式预留字段
@@ -632,8 +632,8 @@ async def lifespan(app: FastAPI):
                     CREATE TABLE team (
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         name VARCHAR(100) NOT NULL,
-                        login_username VARCHAR(80) UNIQUE NOT NULL,
-                        password_hash VARCHAR(256) NOT NULL,
+                        login_username VARCHAR(80) UNIQUE,
+                        password_hash VARCHAR(256),
                         owner_user_id INT NOT NULL,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         payment_method VARCHAR(50) DEFAULT ""
@@ -656,6 +656,46 @@ async def lifespan(app: FastAPI):
                 '''))
                 conn.commit()
                 print('[迁移] team_account 表创建完成')
+            if 'team_member' not in existing_tables:
+                conn.execute(text('''
+                    CREATE TABLE team_member (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        team_id INT NOT NULL,
+                        user_id INT NOT NULL,
+                        added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE INDEX idx_team_member (team_id, user_id)
+                    )
+                '''))
+                conn.commit()
+                print('[迁移] team_member 表创建完成')
+    except:
+        pass
+
+    # 修复已有 team 表：login_username / password_hash 改为可选（新版团队只需名称+成员ID）
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('ALTER TABLE team MODIFY login_username VARCHAR(80) UNIQUE NULL'))
+            conn.execute(text('ALTER TABLE team MODIFY password_hash VARCHAR(256) NULL'))
+            conn.commit()
+            print('[迁移] team 表 login_username/password_hash 已改为可选')
+    except:
+        pass
+
+    # 确保 pay_url / pay_url_wechat / pay_url_alipay 列存在
+    try:
+        with engine.connect() as conn:
+            for col, col_type in [
+                ('pay_url', 'VARCHAR(500) DEFAULT ""'),
+                ('pay_url_wechat', 'VARCHAR(500) DEFAULT ""'),
+                ('pay_url_alipay', 'VARCHAR(500) DEFAULT ""'),
+                ('pay_status', 'VARCHAR(20) DEFAULT ""'),
+            ]:
+                try:
+                    conn.execute(text(f'ALTER TABLE phone_record ADD COLUMN {col} {col_type}'))
+                    conn.commit()
+                    print(f'[迁移] phone_record.{col} 列已添加')
+                except:
+                    pass
     except:
         pass
 
@@ -689,9 +729,17 @@ app.add_middleware(SessionMiddleware, secret_key=Config.SECRET_KEY, session_cook
 from routes.api_app import router as api_app_router
 app.include_router(api_app_router)
 
+# 团队管理 API — 使用 routes/api_teams.py 中的新版路由（基于用户ID，无需登录账号密码）
+from routes.api_teams import router as api_teams_router
+app.include_router(api_teams_router)
+
 # 注册桥接 API 路由（/api/bridge/*）— 同一进程内 HTTP 桥接，端口 5000
 from routes.api_bridge import router as api_bridge_router
 app.include_router(api_bridge_router)
+
+# 注册客户端 API 路由（/api/client/* /api/phone/*）— 手机心跳/任务分配
+from routes.api_client import router as api_client_router
+app.include_router(api_client_router)
 
 TEMPLATES_DIR = os.path.join(BASEDIR, "templates")
 if not os.path.exists(TEMPLATES_DIR):
@@ -2116,6 +2164,9 @@ async def get_config(user: User = Depends(get_current_user), db: SQLSession = De
         'rush_paused': cfg.rush_paused if hasattr(cfg, 'rush_paused') else 0,
         'rush_mode': cfg.rush_mode if hasattr(cfg, 'rush_mode') else 0,
         'phone_multi_open_count': getattr(cfg, 'phone_multi_open_count', 3),
+        'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0),
+        'phone_deploy_info': getattr(cfg, 'phone_deploy_info', ''),
+        'phone_device_assign': getattr(cfg, 'phone_device_assign', ''),
     })
 
 
@@ -2148,6 +2199,8 @@ async def set_config(request: Request, user: User = Depends(get_current_user), d
     if 'interval_mode' in data: cfg.interval_mode = int(data['interval_mode'])
     if 'rush_mode' in data: cfg.rush_mode = int(data['rush_mode'])
     if 'phone_multi_open_count' in data: cfg.phone_multi_open_count = int(data['phone_multi_open_count'])
+    if 'phone_rush_enabled' in data: cfg.phone_rush_enabled = int(data['phone_rush_enabled'])
+    if 'phone_device_assign' in data: cfg.phone_device_assign = str(data['phone_device_assign'])
     db.commit()
     return JSONResponse(content={'status': 'success'})
 
@@ -4176,6 +4229,10 @@ async def client_report_result(request: Request, db: SQLSession = Depends(get_db
     
     if success:
         record.bid_result = f"成功-订单{order_id}"; record.balance = "待支付"
+        record.pay_url_alipay = data.get('pay_url_alipay', '') or ''
+        record.pay_url_wechat = data.get('pay_url_wechat', '') or ''
+        record.pay_url = data.get('pay_url_unionpay', '') or ''  # 云闪付/银联 → pay_url
+        record.pay_status = '待支付'
         if h5_url: qrcode.make(h5_url).save(os.path.join(QRCODE_FOLDER, f"{phone}.png"))
     else: record.bid_result = f"失败-{error_msg[:50]}"
     record.last_updated = datetime.datetime.utcnow(); db.commit()
@@ -4642,86 +4699,9 @@ async def team_dashboard(request: Request, team: Team = Depends(get_current_team
         "now": datetime.datetime.now
     })
 
-# ---------- 团队 CRUD（主站）----------
-@app.get("/api/teams")
-async def list_teams(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """列出当前用户的所有团队"""
-    if user.id == 1 or user.username.lower() == "admin":
-        teams = db.query(Team).all()
-    else:
-        teams = db.query(Team).filter(Team.owner_user_id == user.id).all()
-    return JSONResponse(content={
-        'status': 'success',
-        'teams': [{
-            'id': t.id, 'name': t.name,
-            'login_username': t.login_username,
-            'payment_method': t.payment_method or '',
-            'created_at': t.created_at.isoformat() if t.created_at else '',
-            'account_count': db.query(TeamAccount).filter(TeamAccount.team_id == t.id).count()
-        } for t in teams]
-    })
-
-@app.post("/api/teams")
-async def create_team(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """创建团队"""
-    data = await request.json()
-    name = data.get('name', '').strip()
-    login_username = data.get('login_username', '').strip()
-    password = data.get('password', '').strip()
-    if not name or not login_username or not password:
-        return JSONResponse(content={'status': 'error', 'message': '团队名称、登录账号、密码不能为空'}, status_code=400)
-    if db.query(Team).filter(Team.login_username == login_username).first():
-        return JSONResponse(content={'status': 'error', 'message': '登录账号已存在'}, status_code=400)
-    team = Team(
-        name=name, login_username=login_username,
-        password_hash=generate_password_hash(password),
-        owner_user_id=user.id
-    )
-    db.add(team)
-    db.commit()
-    return JSONResponse(content={'status': 'success', 'message': f'团队「{name}」创建成功', 'team_id': team.id})
-
-@app.put("/api/teams/{team_id}")
-async def update_team(team_id: int, request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """更新团队信息"""
-    if user.id == 1 or user.username.lower() == "admin":
-        team = db.query(Team).filter(Team.id == team_id).first()
-    else:
-        team = db.query(Team).filter(Team.id == team_id, Team.owner_user_id == user.id).first()
-    if not team:
-        return JSONResponse(content={'status': 'error', 'message': '团队不存在'}, status_code=404)
-    data = await request.json()
-    if 'name' in data:
-        team.name = data['name'].strip()
-    if 'login_username' in data:
-        new_uname = data['login_username'].strip()
-        existing = db.query(Team).filter(Team.login_username == new_uname, Team.id != team_id).first()
-        if existing:
-            return JSONResponse(content={'status': 'error', 'message': '登录账号已存在'}, status_code=400)
-        team.login_username = new_uname
-    if 'password' in data and data['password'].strip():
-        team.password_hash = generate_password_hash(data['password'].strip())
-    if 'payment_method' in data:
-        team.payment_method = data['payment_method'].strip()
-    db.commit()
-    return JSONResponse(content={'status': 'success', 'message': f'团队「{team.name}」已更新'})
-
-@app.delete("/api/teams/{team_id}")
-async def delete_team(team_id: int, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """删除团队"""
-    if user.id == 1 or user.username.lower() == "admin":
-        team = db.query(Team).filter(Team.id == team_id).first()
-    else:
-        team = db.query(Team).filter(Team.id == team_id, Team.owner_user_id == user.id).first()
-    if not team:
-        return JSONResponse(content={'status': 'error', 'message': '团队不存在'}, status_code=404)
-    # 删除团队-账号映射
-    db.query(TeamAccount).filter(TeamAccount.team_id == team_id).delete()
-    db.delete(team)
-    db.commit()
-    return JSONResponse(content={'status': 'success', 'message': f'团队「{team.name}」已删除'})
-
-# ---------- 团队账号分配 ----------
+# ========== 团队 CRUD — 已迁移至 routes/api_teams.py ==========
+# 团队成员通过 owner_user_id + TeamMember 表管理，无需单独的 login_username/password
+# ========== 团队账号分配（保留 Assign/Unassign，包含 PhoneRecord.team 同步逻辑）==========
 @app.get("/api/teams/{team_id}/accounts")
 async def get_team_accounts(team_id: int, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
     """获取团队名下的账号列表"""
@@ -5031,6 +5011,123 @@ async def slider_health():
         return JSONResponse(content={'slider_api': slider_ok, 'ocr_server': ocr_ok})
     except Exception as e:
         return JSONResponse(content={'slider_api': False, 'ocr_server': False, 'error': str(e)})
+
+
+# ===================== 手机设备管理（网站后台） =====================
+@app.get("/api/phone/dashboard")
+async def phone_dashboard(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
+    """网站后台查看手机设备：在线数/已布置/未布置 + 设备列表"""
+    from routes.api_client import phone_devices
+    cfg = get_user_config(user.id, db)
+    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0)
+    multi_open = getattr(cfg, 'phone_multi_open_count', 3)
+
+    now = time.time()
+    devices = []
+    for device_id, info in list(phone_devices.items()):
+        if now - info['last_heartbeat'] < 35:
+            # 普通用户只看自己的设备，admin/root(user.id==1)看全部
+            if user.id != 1 and info.get('uploader_id') != user.id:
+                continue
+            devices.append({
+                'device_id': device_id[:16],
+                'uploader_id': info['uploader_id'],
+                'status': info.get('status', 'pending'),
+                'account_count': info.get('account_count', 0),
+                'last_heartbeat': info['last_heartbeat'],
+                'device_info': info.get('device_info', {}),
+            })
+
+    online = len(devices)
+    deployed = sum(1 for d in devices if d['status'] == 'deployed')
+
+    # 已登录账号列表（用于分配）
+    if user.id == 1:
+        acc_records = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True).all()
+    else:
+        acc_records = db.query(PhoneRecord).filter(
+            PhoneRecord.logged_in == True, PhoneRecord.user_id == user.id).all()
+    account_list = [{'phone': r.phone, 'team': r.team or ''} for r in acc_records
+                    if not (r.account_type and ('\u9ed1\u53f7' in r.account_type.lower() or r.account_type.lower() == 'black'))]
+
+    # 已有分配
+    assign_json = getattr(cfg, 'phone_device_assign', '') or '{}'
+    try:
+        assign_map = json.loads(assign_json)
+    except Exception:
+        assign_map = {}
+
+    return JSONResponse(content={
+        'phone_rush_enabled': phone_rush_enabled,
+        'multi_open_count': multi_open,
+        'devices': devices,
+        'online_count': online,
+        'deployed_count': deployed,
+        'pending_count': online - deployed,
+        'accounts': account_list,
+        'assign_map': assign_map,
+    })
+
+
+@app.post("/api/phone/assign")
+async def phone_dashboard_assign(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
+    """网站后台：分配/取消分配账号到设备"""
+    data = await request.json()
+    device_id = data.get('device_id', '') or ''
+    phones = data.get('phones', [])
+
+    if not device_id:
+        return JSONResponse(content={'status': 'error', 'message': '缺少 device_id'})
+
+    cfg = get_user_config(user.id, db)
+    assign_json = getattr(cfg, 'phone_device_assign', '') or '{}'
+    try:
+        assign_map = json.loads(assign_json)
+    except Exception:
+        assign_map = {}
+
+    if phones:
+        assign_map[device_id] = phones
+    else:
+        assign_map.pop(device_id, None)
+
+    cfg.phone_device_assign = json.dumps(assign_map, ensure_ascii=False)
+    db.commit()
+    print(f'[设备分配] device={device_id[:8]} → {len(phones)}个账号 | user={user.username}')
+    return JSONResponse(content={
+        'status': 'success',
+        'message': f'已分配 {len(phones)} 个账号',
+        'assign_map': assign_map,
+    })
+
+
+@app.post("/api/phone/reset")
+async def phone_dashboard_reset(request: Request, user: User = Depends(get_current_user)):
+    """网站后台：重置所有手机部署状态，所有设备下次心跳重新拉数据重新布置"""
+    try:
+        from routes.api_client import phone_devices
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(content={
+            'status': 'error',
+            'message': f'导入 phone_devices 失败: {e}',
+        }, status_code=500)
+    reset_count = 0
+    for info in phone_devices.values():
+        # 普通用户只重置自己的设备
+        if user.id != 1 and info.get('uploader_id') != user.id:
+            continue
+        if info.get('status') == 'deployed':
+            info['status'] = 'pending'
+            info['account_count'] = 0
+            reset_count += 1
+    print(f'[手机重置] 🔄 user={user.username} 重置 {reset_count} 台设备')
+    return JSONResponse(content={
+        'status': 'success',
+        'message': f'已重置 {reset_count} 台设备，所有手机下次心跳将重新拉取数据',
+        'reset_count': reset_count,
+    })
 
 
 # ===================== 管理员页面 =====================

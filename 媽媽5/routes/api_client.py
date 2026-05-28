@@ -4,18 +4,24 @@
 路由 — 客户端 API（任务分配 / 上报 / 暂停 / 代理）
 """
 import os
+import hashlib
 import datetime
+import time
+import json
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+import hashlib
+import time
+import json
 
 from routes import get_db
-from models import PhoneRecord, UserConfig
+from models import PhoneRecord, User, UserConfig
 from core.database import get_user_config, get_user_proxy
 from config import Config, QRCODE_FOLDER
 from services.proxy_manager import proxy_manager
 
-router = APIRouter(tags=["客户端"])
+router = APIRouter(tags=["客户端API"])
 
 
 @router.get("/api/client/get_config")
@@ -325,3 +331,260 @@ async def client_get_device_bindings(request: Request, db: Session = Depends(get
 
     bindings = {r.phone: r.device_key for r in records}
     return JSONResponse(content={'status': 'success', 'bindings': bindings, 'count': len(bindings)})
+
+
+# ===================== 手机客户端专用 API（手机抢购） =====================
+# 手机设备部署状态追踪
+phone_devices: dict = {}  # {device_id: {"uploader_id": int, "device_info": {}, "status": "deployed"/"pending", "last_heartbeat": float, "account_count": int}}
+
+
+def _verify_phone_identity(identity: str, db: Session):
+    """验证手机客户端身份: identity = MD5(username + "_" + str(id))
+    遍历数据库所有平台注册用户（User表），逐一计算 MD5 比对
+    username 可能是手机号也可能是用户名
+    返回 (user_id, username) 或 None"""
+    if not identity:
+        return None
+    all_users = db.query(User).all()
+    for u in all_users:
+        expected = hashlib.md5(f"{u.username}_{u.id}".encode()).hexdigest()
+        if identity == expected:
+            return (u.id, u.username)
+    return None
+
+
+def _get_phone_accounts(uploader_id: int, phone_multi_open_count: int, db: Session, device_assign: str = '') -> list:
+    """获取分配给手机的已登录账号
+    若有 device_assign 配置，则只返回指定设备号的账号"""
+    if uploader_id:
+        all_logged_in = db.query(PhoneRecord).filter(
+            PhoneRecord.logged_in == True, PhoneRecord.user_id == uploader_id).all()
+    else:
+        all_logged_in = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True).all()
+    all_logged_in = [r for r in all_logged_in if not (
+        r.account_type and ('\u9ed1\u53f7' in r.account_type.lower() or r.account_type.lower() == 'black'))]
+
+    # 若有设备分配配置，按 device_assign 过滤
+    if device_assign:
+        try:
+            assign_map = json.loads(device_assign)
+            allowed_phones = set()
+            for phones in assign_map.values():
+                allowed_phones.update(phones)
+            if allowed_phones:
+                all_logged_in = [r for r in all_logged_in if r.phone in allowed_phones]
+        except Exception:
+            pass
+
+    # 按手机多开数限制
+    if phone_multi_open_count > 0 and len(all_logged_in) > phone_multi_open_count:
+        all_logged_in = all_logged_in[:phone_multi_open_count]
+
+    accounts = []
+    for rec in all_logged_in:
+        accounts.append({
+            'phone': rec.phone, 'token': rec.token, 'cookie': rec.cookie,
+            'user_id': rec.user_id_ext, 'mt_device_id': rec.mt_device_id,
+            'raw_device_id': rec.raw_device_id, 'h5_did': rec.h5_did,
+            'h5_start_id': rec.h5_start_id, 'bs_device_id': rec.bs_device_id,
+            'user_agent': rec.user_agent, 'webview_ua': rec.webview_ua,
+            'mt_r': rec.mt_r, 'mt_sn': rec.mt_sn, 'rush_time_offset': rec.rush_time_offset,
+            'item_code': rec.item_code or 'IMTP1000313', 'item_name': rec.item_name or '',
+            'amount': rec.amount or 1, 'task_type': 'rush', 'task_role': rec.task_role or 'both',
+            'proxy_ip': rec.proxy_ip or '', 'device_key': rec.device_key or '',
+        })
+    return accounts
+
+
+@router.post("/api/phone/heartbeat")
+async def phone_heartbeat(request: Request, db: Session = Depends(get_db)):
+    """手机客户端专用心跳
+    已部署: 只返回状态标志（开关/暂停/是否需要重置）——几十字节
+    未部署/被重置: 返回完整配置+账号——重新布置
+    """
+    token = request.headers.get('X-API-TOKEN')
+    if token != Config.API_TOKEN:
+        raise HTTPException(status_code=403, detail="无权限")
+
+    data = await request.json()
+    identity = data.get('identity', '')
+    matched = _verify_phone_identity(identity, db)
+    if not matched:
+        return JSONResponse(content={'status': 'error', 'message': '身份验证失败，未找到匹配账号'}, status_code=403)
+
+    matched_uid, matched_phone = matched
+    device_tag = request.headers.get('X-Device-Id', data.get('device_tag', 'unknown'))
+
+    cfg = get_user_config(matched_uid, db)
+    up = get_user_proxy(matched_uid, db)
+
+    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0)
+    rush_paused = getattr(cfg, 'rush_paused', 0)
+    multi_open = getattr(cfg, 'phone_multi_open_count', 3)
+
+    # 更新设备心跳时间
+    prev_status = phone_devices.get(device_tag, {}).get('status', 'pending')
+    phone_devices[device_tag] = {
+        'uploader_id': matched_uid,
+        'phone': matched_phone,
+        'device_info': data.get('device_info', {}),
+        'last_heartbeat': time.time(),
+        'status': prev_status,
+        'account_count': phone_devices.get(device_tag, {}).get('account_count', 0),
+    }
+
+    client_ip = request.client.host if request.client else 'unknown'
+
+    # === 开关关闭：不做任何事，心跳只轮询 ===
+    if not phone_rush_enabled:
+        print(f'[手机心跳] {matched_phone[:3]}*** | IP={client_ip} | 开关=关')
+        return JSONResponse(content={
+            'has_data': False,
+            'phone_rush_enabled': 0,
+            'rush_paused': rush_paused,
+            'status': prev_status,
+        })
+
+    # === 已部署：只返回状态标志，不返数据 ===
+    if prev_status == 'deployed':
+        print(f'[手机心跳] {matched_phone[:3]}*** | IP={client_ip} | 已部署 | 暂停={rush_paused}')
+        return JSONResponse(content={
+            'has_data': False,
+            'phone_rush_enabled': 1,
+            'rush_paused': rush_paused,
+            'status': 'deployed',
+        })
+
+    # === 未部署/被重置：返回完整数据 ===
+    rush_time_str = f"{cfg.rush_hour:02d}:{cfg.rush_minute:02d}:{cfg.rush_second:02d}"
+    device_assign = getattr(cfg, 'phone_device_assign', '')
+    accounts = _get_phone_accounts(matched_uid, multi_open, db, device_assign)
+
+    print(f'[手机心跳] {matched_phone[:3]}*** | IP={client_ip} | 下发数据 | 时间={rush_time_str} | 频率={getattr(cfg, "task_frequency", 100)}ms | 次数={getattr(cfg, "rush_count", 100)} | 多开={multi_open} | 账号={len(accounts)}个')
+
+    return JSONResponse(content={
+        'has_data': True,
+        'phone_rush_enabled': 1,
+        'rush_paused': rush_paused,
+        'status': 'pending',
+        'rush_config': {
+            'rush_hour': cfg.rush_hour,
+            'rush_minute': cfg.rush_minute,
+            'rush_second': cfg.rush_second,
+            'rush_millisecond': getattr(cfg, 'rush_millisecond', 0),
+            'task_frequency': getattr(cfg, 'task_frequency', 100),
+            'rush_count': getattr(cfg, 'rush_count', 100),
+            'rush_attempts': getattr(cfg, 'rush_attempts', 10000),
+            'multi_open_count': multi_open,
+            'interval_mode': getattr(cfg, 'interval_mode', 0),
+            'rush_paused': rush_paused,
+            'proxy_enabled': up.proxy_enabled,
+            'proxy_url': up.proxy_url,
+        },
+        'accounts': accounts,
+        'multi_open_count': multi_open,
+    })
+
+
+@router.post("/api/phone/ready")
+async def phone_ready(request: Request, db: Session = Depends(get_db)):
+    """手机客户端确认部署完成
+    客户端收到账号后验证登录信息 → 告知服务端「布置完毕」"""
+    token = request.headers.get('X-API-TOKEN')
+    if token != Config.API_TOKEN:
+        raise HTTPException(status_code=403, detail="无权限")
+
+    data = await request.json()
+    identity = data.get('identity', '')
+    matched = _verify_phone_identity(identity, db)
+    if not matched:
+        return JSONResponse(content={'status': 'error', 'message': '身份验证失败'}, status_code=403)
+
+    matched_uid, matched_phone = matched
+    verified_count = data.get('verified_count', 0)
+    device_tag = request.headers.get('X-Device-Id', data.get('device_tag', 'unknown'))
+
+    # 更新设备状态为已部署
+    if device_tag in phone_devices:
+        phone_devices[device_tag]['status'] = 'deployed'
+        phone_devices[device_tag]['account_count'] = verified_count
+
+    print(f'[手机就绪] ✅ {matched_phone[:3]}*** | 验证通过={verified_count}个账号')
+    return JSONResponse(content={
+        'status': 'ready',
+        'message': f'已就绪，{verified_count}个账号已布置',
+        'deployed_count': sum(1 for d in phone_devices.values() if d['status'] == 'deployed'),
+        'online_count': len(phone_devices),
+    })
+
+
+@router.get("/api/phone/status")
+async def phone_status(request: Request, db: Session = Depends(get_db)):
+    """手机客户端查询当前状态（是否有新配置/暂停变更/需要重置）"""
+    token = request.headers.get('X-API-TOKEN')
+    if token != Config.API_TOKEN:
+        raise HTTPException(status_code=403, detail="无权限")
+
+    identity = request.query_params.get('identity', '')
+    matched = _verify_phone_identity(identity, db)
+    if not matched:
+        return JSONResponse(content={'status': 'error', 'message': '身份验证失败'}, status_code=403)
+
+    matched_uid, matched_phone = matched
+    cfg = get_user_config(matched_uid, db)
+    up = get_user_proxy(matched_uid, db)
+
+    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0)
+    paused = getattr(cfg, 'rush_paused', 0)
+
+    # 统计在线/已部署/未部署
+    now = time.time()
+    online_count = sum(1 for d in phone_devices.values() if now - d['last_heartbeat'] < 35)
+    deployed_count = sum(1 for d in phone_devices.values() if d['status'] == 'deployed' and now - d['last_heartbeat'] < 35)
+    pending_count = online_count - deployed_count
+
+    return JSONResponse(content={
+        'phone_rush_enabled': phone_rush_enabled,
+        'rush_paused': paused,
+        'proxy_enabled': up.proxy_enabled,
+        'proxy_url': up.proxy_url,
+        'stats': {
+            'online_count': online_count,
+            'deployed_count': deployed_count,
+            'pending_count': pending_count,
+        },
+    })
+
+
+@router.get("/api/phone/devices")
+async def phone_devices_list(request: Request, db: Session = Depends(get_db)):
+    """获取在线手机设备列表（网站后台查看）"""
+    token = request.headers.get('X-API-TOKEN')
+    if token != Config.API_TOKEN:
+        raise HTTPException(status_code=403, detail="无权限")
+
+    now = time.time()
+    devices = []
+    for device_id, info in list(phone_devices.items()):
+        if now - info['last_heartbeat'] < 35:  # 35秒内有心跳=在线
+            devices.append({
+                'device_id': device_id,
+                'uploader_id': info['uploader_id'],
+                'status': info.get('status', 'pending'),
+                'account_count': info.get('account_count', 0),
+                'last_heartbeat': info['last_heartbeat'],
+                'device_info': info.get('device_info', {}),
+            })
+
+    online_count = len(devices)
+    deployed_count = sum(1 for d in devices if d['status'] == 'deployed')
+
+    return JSONResponse(content={
+        'devices': devices,
+        'online_count': online_count,
+        'deployed_count': deployed_count,
+        'pending_count': online_count - deployed_count,
+    })
+
+
+# ⚠️ /api/phone/reset 和 /api/phone/assign 在 moutai_automation.py 中定义（网站后台用 session 认证）
