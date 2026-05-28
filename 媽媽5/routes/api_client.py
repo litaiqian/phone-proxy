@@ -34,6 +34,9 @@ async def client_get_config(request: Request, db: Session = Depends(get_db)):
     else:
         cfg = get_user_config(1, db)
         up = get_user_proxy(1, db)
+    client_ip = request.client.host if request.client else 'unknown'
+    rush_time_str = f"{cfg.rush_hour:02d}:{cfg.rush_minute:02d}:{cfg.rush_second:02d}"
+    print(f'[取配置] → IP={client_ip} | 抢购时间={rush_time_str} | 频率={getattr(cfg, "task_frequency", 100)}ms | 次数={getattr(cfg, "rush_count", 100)}/轮 | 多开={cfg.multi_open_count or 1} | 暂停={getattr(cfg, "rush_paused", 0)}')
     return JSONResponse(content={
         'rush_hour': cfg.rush_hour, 'rush_minute': cfg.rush_minute,
         'rush_second': cfg.rush_second, 'item_code': 'IMTP1000313', 'act_id': '',
@@ -100,6 +103,10 @@ async def client_get_tasks(request: Request, db: Session = Depends(get_db)):
         for rec in all_logged_in:
             assigned_tasks.append(_task_dict(rec))
 
+    client_ip = request.client.host if request.client else 'unknown'
+    phone_list = [t['phone'] for t in assigned_tasks]
+    batch = data.get('batch', 0)
+    print(f'[取任务] → IP={client_ip} | 窗口={batch+1} | 多开数={multi_open_count} | 白号总数={len(all_logged_in)} | 下发账号: {phone_list}')
     return JSONResponse(content={'status': 'success', 'tasks': assigned_tasks})
 
 

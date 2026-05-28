@@ -2886,6 +2886,9 @@ async def client_get_config(request: Request, db: SQLSession = Depends(get_db)):
     multi_open_count = cfg.multi_open_count or 1
     # 计算需要多少个客户端窗口
     total_windows = (logged_in_count + multi_open_count - 1) // multi_open_count if logged_in_count > 0 else 0
+    client_ip = request.client.host if request.client else 'unknown'
+    rush_time_str = f"{cfg.rush_hour:02d}:{cfg.rush_minute:02d}:{cfg.rush_second:02d}.{getattr(cfg, 'rush_millisecond', 0):03d}"
+    print(f'[取配置] → IP={client_ip} | 抢购时间={rush_time_str} | 频率={cfg.task_frequency}ms | 次数={getattr(cfg, "rush_count", 100)}/轮 | 多开数={multi_open_count} | 白号={logged_in_count} | 暂停={getattr(cfg, "rush_paused", 0)} | 代理={up.proxy_enabled}')
     return JSONResponse(content={
         'rush_hour': cfg.rush_hour, 'rush_minute': cfg.rush_minute, 'rush_second': cfg.rush_second,
         'rush_millisecond': getattr(cfg, 'rush_millisecond', 0),
@@ -3705,10 +3708,12 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
         # 同步更新 server_list（IP 聚合）
         _update_server_list(client_ip, data.get('hostname', ''), len(assigned_tasks))
     
-    # 仅新窗口注册时打印日志，轮询心跳不重复打印
+    # 每次请求都打印日志，方便追踪客户端获取了哪些任务
+    phone_list = [r.phone for r in assigned_tasks]
     if is_new:
-        phone_list = [r.phone for r in assigned_tasks]
-        print(f'[任务分发] 窗口{batch} | IP={client_ip} | 多开数={multi_open_count} | 白号总数={len(all_logged_in)} | UUID={client_uuid[:8] if client_uuid else "-"} | 负责手机号: {phone_list}')
+        print(f'[取任务] 🆕 新窗口{batch+1} | IP={client_ip} | 多开数={multi_open_count} | 白号总数={len(all_logged_in)} | UUID={client_uuid[:8] if client_uuid else "-"} | 下发账号: {phone_list}')
+    else:
+        print(f'[取任务] 🔄 窗口{batch+1} | IP={client_ip} | 下发账号: {phone_list}')
     
     return JSONResponse(content={'status': 'success', 'tasks': _build_task_response(assigned_tasks, db=db, uploader_id=uploader_id)})
 
@@ -3735,6 +3740,7 @@ async def client_heartbeat(request: Request):
     existing = active_client_windows.get(client_id, {})
     if not uploader_id:
         uploader_id = existing.get('uploader_id', 0)
+    is_new_hb = client_id not in active_client_windows
     
     active_client_windows[client_id] = {
         "batch": batch,
@@ -3776,6 +3782,10 @@ async def client_heartbeat(request: Request):
             pass
     # 每次心跳顺便清理过期窗口和超时重启追踪
     get_active_client_count()
+    # 仅首次心跳打印，后续静默避免刷屏
+    if is_new_hb:
+        window_no = batch + 1 if batch >= 0 else '?'
+        print(f'[心跳] 🟢 窗口{window_no} 首次连接 | IP={client_ip} | 窗口={ip_win_count}个 | 任务={ip_task_sum}个')
     # 返回最新库存状态 + 服务重启指令
     # 检查待处理重启：用户点击按钮时 server_list 为空，等客户端上线后补发
     if _pending_server_restart and _pending_server_restart.get('version', 0) > 0:
