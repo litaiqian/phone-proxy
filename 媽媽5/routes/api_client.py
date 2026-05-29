@@ -420,9 +420,9 @@ async def phone_heartbeat(request: Request, db: Session = Depends(get_db)):
     cfg = get_user_config(matched_uid, db)
     up = get_user_proxy(matched_uid, db)
 
-    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0)
-    rush_paused = getattr(cfg, 'rush_paused', 0)
-    multi_open = getattr(cfg, 'phone_multi_open_count', 3)
+    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0) or 0
+    rush_paused = getattr(cfg, 'rush_paused', 0) or 0
+    multi_open = getattr(cfg, 'phone_multi_open_count', 3) or 3
 
     # 更新设备心跳时间
     prev_status = phone_devices.get(device_tag, {}).get('status', 'pending')
@@ -538,8 +538,8 @@ async def phone_status(request: Request, db: Session = Depends(get_db)):
     cfg = get_user_config(matched_uid, db)
     up = get_user_proxy(matched_uid, db)
 
-    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0)
-    paused = getattr(cfg, 'rush_paused', 0)
+    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0) or 0
+    paused = getattr(cfg, 'rush_paused', 0) or 0
 
     # 统计在线/已部署/未部署
     now = time.time()

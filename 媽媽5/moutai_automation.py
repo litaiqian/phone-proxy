@@ -2161,10 +2161,10 @@ async def get_config(user: User = Depends(get_current_user), db: SQLSession = De
         'anti_ban_proxy_url': up.proxy_url,
         'client_windows': cfg.client_windows if hasattr(cfg, 'client_windows') else 10,
         'interval_mode': cfg.interval_mode if hasattr(cfg, 'interval_mode') else 0,
-        'rush_paused': cfg.rush_paused if hasattr(cfg, 'rush_paused') else 0,
-        'rush_mode': cfg.rush_mode if hasattr(cfg, 'rush_mode') else 0,
-        'phone_multi_open_count': getattr(cfg, 'phone_multi_open_count', 3),
-        'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0),
+        'rush_paused': cfg.rush_paused if hasattr(cfg, 'rush_paused') and cfg.rush_paused is not None else 0,
+        'rush_mode': cfg.rush_mode if hasattr(cfg, 'rush_mode') and cfg.rush_mode is not None else 0,
+        'phone_multi_open_count': getattr(cfg, 'phone_multi_open_count', 3) or 3,
+        'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0) or 0,
         'phone_deploy_info': getattr(cfg, 'phone_deploy_info', ''),
         'phone_device_assign': getattr(cfg, 'phone_device_assign', ''),
     })
@@ -2232,18 +2232,24 @@ async def phone_proxy_websocket(websocket: WebSocket):
                         phone_ws_uid_map[device_id] = user_id
 
                 # 查询当前用户的手机抢购状态，注册时一并下发
+                # phone_rush_enabled 是全局开关，始终从 admin(uid=1) 配置读取
                 status_data = {'phone_rush_enabled': 0, 'rush_paused': 0}
-                if user_id:
-                    try:
-                        db2 = next(get_db())
+                try:
+                    db2 = next(get_db())
+                    admin_cfg2 = get_user_config(1, db2)
+                    phone_rush = getattr(admin_cfg2, 'phone_rush_enabled', 0) or 0
+                    if user_id:
                         cfg2 = get_user_config(user_id, db2)
-                        status_data = {
-                            'phone_rush_enabled': getattr(cfg2, 'phone_rush_enabled', 0),
-                            'rush_paused': getattr(cfg2, 'rush_paused', 0),
-                        }
-                        db2.close()
-                    except Exception:
-                        pass
+                        rush_paused = getattr(cfg2, 'rush_paused', 0) or 0
+                    else:
+                        rush_paused = 0
+                    status_data = {
+                        'phone_rush_enabled': phone_rush,
+                        'rush_paused': rush_paused,
+                    }
+                    db2.close()
+                except Exception:
+                    pass
 
                 await websocket.send_text(json.dumps({
                     'type': 'registered',
@@ -2315,8 +2321,8 @@ async def set_config(request: Request, user: User = Depends(get_current_user), d
     # === 实时推送：手机抢购状态变更 → 所有已连接手机设备 ===
     if 'phone_rush_enabled' in data or 'rush_paused' in data:
         asyncio.create_task(broadcast_phone_status_to_user(user.id, {
-            'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0),
-            'rush_paused': getattr(cfg, 'rush_paused', 0),
+            'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0) or 0,
+            'rush_paused': getattr(cfg, 'rush_paused', 0) or 0,
         }))
     return JSONResponse(content={'status': 'success'})
 
