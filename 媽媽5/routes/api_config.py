@@ -32,6 +32,8 @@ async def get_config_api(user: User = Depends(get_current_user), db: Session = D
         'anti_ban_proxy_enabled': up.proxy_enabled,
         'anti_ban_proxy_url': up.proxy_url,
         'phone_multi_open_count': getattr(cfg, 'phone_multi_open_count', 3),
+        'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0),
+        'rush_mode': getattr(cfg, 'rush_mode', 0),
     })
 
 
@@ -69,6 +71,10 @@ async def set_config_api(request: Request, user: User = Depends(get_current_user
         cfg.client_windows = int(data['client_windows'])
     if 'phone_multi_open_count' in data:
         cfg.phone_multi_open_count = int(data['phone_multi_open_count'])
+    if 'phone_rush_enabled' in data:
+        cfg.phone_rush_enabled = int(data['phone_rush_enabled'])
+    if 'rush_mode' in data:
+        cfg.rush_mode = int(data['rush_mode'])
     if 'anti_ban_proxy_enabled' in data:
         up.proxy_enabled = bool(data['anti_ban_proxy_enabled'])
     if 'anti_ban_proxy_url' in data:
