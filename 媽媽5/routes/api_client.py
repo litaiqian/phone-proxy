@@ -41,7 +41,7 @@ async def client_get_config(request: Request, db: Session = Depends(get_db)):
         cfg = get_user_config(1, db)
         up = get_user_proxy(1, db)
     client_ip = request.client.host if request.client else 'unknown'
-    rush_time_str = f"{cfg.rush_hour:02d}:{cfg.rush_minute:02d}:{cfg.rush_second:02d}"
+    rush_time_str = f"{getattr(cfg, 'rush_hour', 0) or 0:02d}:{getattr(cfg, 'rush_minute', 0) or 0:02d}:{getattr(cfg, 'rush_second', 0) or 0:02d}"
     print(f'[取配置] → IP={client_ip} | 抢购时间={rush_time_str} | 频率={getattr(cfg, "task_frequency", 100)}ms | 次数={getattr(cfg, "rush_count", 100)}/轮 | 多开={cfg.multi_open_count or 1} | 暂停={getattr(cfg, "rush_paused", 0)}')
     return JSONResponse(content={
         'rush_hour': cfg.rush_hour, 'rush_minute': cfg.rush_minute,
@@ -415,10 +415,12 @@ async def phone_heartbeat(request: Request, db: Session = Depends(get_db)):
     matched_uid, matched_phone = matched
     device_tag = request.headers.get('X-Device-Id', data.get('device_tag', 'unknown'))
 
+    # phone_rush_enabled 是全局开关，始终从 admin(uid=1) 配置读取
+    admin_cfg = get_user_config(1, db)
     cfg = get_user_config(matched_uid, db)
     up = get_user_proxy(matched_uid, db)
 
-    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0)
+    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0)
     rush_paused = getattr(cfg, 'rush_paused', 0)
     multi_open = getattr(cfg, 'phone_multi_open_count', 3)
 
@@ -456,7 +458,7 @@ async def phone_heartbeat(request: Request, db: Session = Depends(get_db)):
         })
 
     # === 未部署/被重置：返回完整数据 ===
-    rush_time_str = f"{cfg.rush_hour:02d}:{cfg.rush_minute:02d}:{cfg.rush_second:02d}"
+    rush_time_str = f"{getattr(cfg, 'rush_hour', 0) or 0:02d}:{getattr(cfg, 'rush_minute', 0) or 0:02d}:{getattr(cfg, 'rush_second', 0) or 0:02d}"
     device_assign = getattr(cfg, 'phone_device_assign', '')
     accounts = _get_phone_accounts(matched_uid, multi_open, db, device_assign)
 
@@ -531,10 +533,12 @@ async def phone_status(request: Request, db: Session = Depends(get_db)):
         return JSONResponse(content={'status': 'error', 'message': '身份验证失败'}, status_code=403)
 
     matched_uid, matched_phone = matched
+    # phone_rush_enabled 是全局开关，始终从 admin(uid=1) 配置读取
+    admin_cfg = get_user_config(1, db)
     cfg = get_user_config(matched_uid, db)
     up = get_user_proxy(matched_uid, db)
 
-    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0)
+    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0)
     paused = getattr(cfg, 'rush_paused', 0)
 
     # 统计在线/已部署/未部署
