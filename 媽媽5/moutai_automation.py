@@ -2232,24 +2232,18 @@ async def phone_proxy_websocket(websocket: WebSocket):
                         phone_ws_uid_map[device_id] = user_id
 
                 # 查询当前用户的手机抢购状态，注册时一并下发
-                # phone_rush_enabled 是全局开关，始终从 admin(uid=1) 配置读取
                 status_data = {'phone_rush_enabled': 0, 'rush_paused': 0}
-                try:
-                    db2 = next(get_db())
-                    admin_cfg2 = get_user_config(1, db2)
-                    phone_rush = getattr(admin_cfg2, 'phone_rush_enabled', 0) or 0
-                    if user_id:
+                if user_id:
+                    try:
+                        db2 = next(get_db())
                         cfg2 = get_user_config(user_id, db2)
-                        rush_paused = getattr(cfg2, 'rush_paused', 0) or 0
-                    else:
-                        rush_paused = 0
-                    status_data = {
-                        'phone_rush_enabled': phone_rush,
-                        'rush_paused': rush_paused,
-                    }
-                    db2.close()
-                except Exception:
-                    pass
+                        status_data = {
+                            'phone_rush_enabled': getattr(cfg2, 'phone_rush_enabled', 0) or 0,
+                            'rush_paused': getattr(cfg2, 'rush_paused', 0) or 0,
+                        }
+                        db2.close()
+                    except Exception:
+                        pass
 
                 await websocket.send_text(json.dumps({
                     'type': 'registered',

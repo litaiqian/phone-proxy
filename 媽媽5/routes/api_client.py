@@ -415,12 +415,10 @@ async def phone_heartbeat(request: Request, db: Session = Depends(get_db)):
     matched_uid, matched_phone = matched
     device_tag = request.headers.get('X-Device-Id', data.get('device_tag', 'unknown'))
 
-    # phone_rush_enabled 是全局开关，始终从 admin(uid=1) 配置读取
-    admin_cfg = get_user_config(1, db)
     cfg = get_user_config(matched_uid, db)
     up = get_user_proxy(matched_uid, db)
 
-    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0) or 0
+    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0) or 0
     rush_paused = getattr(cfg, 'rush_paused', 0) or 0
     multi_open = getattr(cfg, 'phone_multi_open_count', 3) or 3
 
@@ -533,12 +531,10 @@ async def phone_status(request: Request, db: Session = Depends(get_db)):
         return JSONResponse(content={'status': 'error', 'message': '身份验证失败'}, status_code=403)
 
     matched_uid, matched_phone = matched
-    # phone_rush_enabled 是全局开关，始终从 admin(uid=1) 配置读取
-    admin_cfg = get_user_config(1, db)
     cfg = get_user_config(matched_uid, db)
     up = get_user_proxy(matched_uid, db)
 
-    phone_rush_enabled = getattr(admin_cfg, 'phone_rush_enabled', 0) or 0
+    phone_rush_enabled = getattr(cfg, 'phone_rush_enabled', 0) or 0
     paused = getattr(cfg, 'rush_paused', 0) or 0
 
     # 统计在线/已部署/未部署
