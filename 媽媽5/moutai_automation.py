@@ -439,6 +439,9 @@ class UserConfig(Base):
     excluded_uploaders = Column(String(500), default='')   # 排除的上传者，逗号分隔
     rush_mode = Column(Integer, default=0)                 # 抢购模式: 0=调试/关闭, 1=正式/开启
     phone_multi_open_count = Column(Integer, default=3)   # 手机多开数（只针对手机端）
+    phone_rush_enabled = Column(Integer, default=0)        # 手机抢购开关 0=关闭 1=开启
+    phone_deploy_info = Column(String(500), default='')    # 手机部署信息
+    phone_device_assign = Column(String(2000), default='') # 手机设备分配配置
 
 class UserProxy(Base):
     """IP代理 + 防封策略，每用户独立"""
@@ -612,6 +615,9 @@ async def lifespan(app: FastAPI):
                 ('interval_mode', 'ALTER TABLE user_config ADD COLUMN interval_mode INTEGER DEFAULT 0'),
                 ('rush_mode', 'ALTER TABLE user_config ADD COLUMN rush_mode INTEGER DEFAULT 0'),
                 ('phone_multi_open_count', 'ALTER TABLE user_config ADD COLUMN phone_multi_open_count INTEGER DEFAULT 3'),
+                ('phone_rush_enabled', 'ALTER TABLE user_config ADD COLUMN phone_rush_enabled INTEGER DEFAULT 0'),
+                ('phone_deploy_info', 'ALTER TABLE user_config ADD COLUMN phone_deploy_info VARCHAR(500) DEFAULT ""'),
+                ('phone_device_assign', 'ALTER TABLE user_config ADD COLUMN phone_device_assign VARCHAR(2000) DEFAULT ""'),
             ]
             for col_name, alter_sql in uc_migrations:
                 if col_name not in uc_columns:
