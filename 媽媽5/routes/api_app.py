@@ -13,42 +13,41 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from routes import get_db
-from models import User, PhoneRecord, Team, TeamMember, TeamAccount
-
 router = APIRouter(tags=["养猫App"])
+
+from routes import get_db  # noqa: E402
+from moutai_automation import User, PhoneRecord, Team, TeamMember, TeamAccount  # noqa: E402
 security = HTTPBearer(auto_error=False)
 
-# 简易内存 token 存储: token -> user_id （服务重启后丢失，后续可迁移到 DB）
-_token_store: dict = {}
+# App Token 存储：直接写入 User 表 api_token 字段（服务重启不丢失）
 
 # 在线时长追踪: user_id -> {last_hb, session_start, accumulated_seconds}
 _online_tracker: dict = {}
 HEARTBEAT_TIMEOUT = 120  # 超过120秒无心跳视为离线
 
 
+def _issue_token(user_id: int, db: Session) -> str:
+    """签发 token：写入 User.api_token 字段持久化"""
+    token = uuid.uuid4().hex
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        user.api_token = token
+        db.commit()
+    return token
+
+
 def get_app_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ):
-    """Bearer Token 认证依赖"""
+    """Bearer Token 认证：从数据库 api_token 字段查询"""
     if not credentials:
         raise HTTPException(status_code=401, detail="未提供令牌")
     token = credentials.credentials
-    user_id = _token_store.get(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="令牌无效或已过期")
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.api_token == token).first()
     if not user:
-        raise HTTPException(status_code=401, detail="用户不存在")
+        raise HTTPException(status_code=401, detail="令牌无效或已过期")
     return user
-
-
-def _issue_token(user_id: int) -> str:
-    """签发 token"""
-    token = uuid.uuid4().hex
-    _token_store[token] = user_id
-    return token
 
 
 # ===================== 注册 =====================
@@ -106,7 +105,7 @@ async def app_register(request: Request, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    token = _issue_token(user.id)
+    token = _issue_token(user.id, db)
     return JSONResponse(content={
         'ok': True, 'token': token,
         'user_id': str(user.id), 'username': user.username,
@@ -188,7 +187,7 @@ async def app_login(request: Request, db: Session = Depends(get_db)):
     user.last_failed_date = None
     db.commit()
 
-    token = _issue_token(user.id)
+    token = _issue_token(user.id, db)
     return JSONResponse(content={
         'ok': True, 'token': token,
         'user_id': str(user.id), 'username': user.username
@@ -240,8 +239,8 @@ async def app_bind_account(
         return JSONResponse(content={'ok': False, 'error': '该手机号已被其他用户绑定'})
 
     from routes.web_bind import build_client_from_record
-    from services.keepalive import save_account_to_json
-    from config import BASEDIR
+    from moutai_automation import save_account_to_json
+    from moutai_automation import BASEDIR
     import datetime as dt
 
     # 创建或更新 PhoneRecord
@@ -362,6 +361,9 @@ async def app_bind_status(
             'paid': r.pay_status == 'success',
             'bid_result': r.bid_result or '',
             'pay_status': r.pay_status or '',
+            'pay_url': r.pay_url or '',
+            'pay_url_wechat': r.pay_url_wechat or '',
+            'pay_url_alipay': r.pay_url_alipay or '',
         })
     
     # 统计活跃设备
@@ -618,8 +620,8 @@ async def app_notify_won(request: Request, db: Session = Depends(get_db)):
         db.commit()
 
     # 广播中签通知到在线设备
-    print(f'[中签推送] 📱 {masked} | {item} | order={order_id}')
-    return JSONResponse(content={'ok': True, 'message': f'已推送至 {masked}'})
+    print(f'[中签推送] 📱 {phone[:3]}****{phone[-4:]} | {item} | order={order_id}')
+    return JSONResponse(content={'ok': True, 'message': f'已推送至 {phone[:3]}****{phone[-4:]}'})
 
 
 # ===================== 团队列表（App 端只读展示） =====================

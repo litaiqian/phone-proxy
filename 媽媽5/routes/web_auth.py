@@ -8,10 +8,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from routes import get_db, get_current_user, login_user, logout_user
-from models import User
-
 router = APIRouter(tags=["认证"])
+
+from routes import get_db, get_current_user, login_user, logout_user  # noqa: E402
+from moutai_automation import User  # noqa: E402
 
 
 @router.get("/login", response_class=HTMLResponse)

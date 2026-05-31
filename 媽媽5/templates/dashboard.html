@@ -36,12 +36,7 @@
             <span class="text-secondary">😴 未登录：<b id="stat-never">0</b></span>
             <span class="text-success">⚪ 白号：<b id="stat-white">0</b></span>
             <span>⚫ 黑号：<b id="stat-black">0</b></span>
-            <span class="text-info">💰 支付二维码：<b id="stat-qrcode">0</b></span>
-            <span class="text-primary">🌐 代理IP：<b id="stat-ip-count">0</b></span>
-            <span class="text-success">就绪/<b id="stat-ip-ready">0</b></span>
-            <span class="text-muted">池中/<b id="stat-ip-pool">0</b></span>
-            <span class="text-muted">已配/<b id="stat-ip-bound">0</b></span>
-            <span class="text-muted">独立/<b id="stat-ip-unique">0</b></span>
+
         </div>
         <!-- 团队统计行 -->
         <div class="col-12 d-flex align-items-center flex-wrap gap-3 mt-1">
@@ -214,7 +209,7 @@
                 <tr>
                     <th>团队</th><th>上传者</th><th>手机号</th>
                     <th>商品编号</th><th>数量</th>
-                    <th>操作</th><th>登录状态</th><th>中标结果</th><th>支付链接</th><th>支付二维码</th><th>登录时间</th>
+                    <th>操作</th><th>登录状态</th><th>中标结果</th><th>支付链接</th><th>登录时间</th>
                 </tr>
             </thead>
             <tbody id="recordBody">
@@ -265,11 +260,6 @@
                                 <span class="text-muted small">未生成</span>
                             {% endif %}
                         </td>
-                        <td class="qrcode-cell">
-                            <span class="qrcode-placeholder" data-phone="{{ rec.phone }}">
-                                <!-- 二维码将由 JS 动态加载 -->
-                            </span>
-                        </td>
                         <td class="login-time-cell">
                             {% if rec.login_time %}
                                 {% set today = now() %}
@@ -291,7 +281,7 @@
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="11" class="text-center text-muted py-4">
+                        <td colspan="10" class="text-center text-muted py-4">
                             <h5>📭 暂无数据</h5>
                             <p>请导入 Excel 文件或联系管理员添加账号。</p>
                         </td>
@@ -490,23 +480,6 @@ async function clearAllRecords() {
     const data = await res.json();
     showToast(data.message, data.status === 'success' ? 'success' : 'error');
     if (data.status === 'success') location.reload();
-}
-
-// ---------- JavaScript 动态加载二维码（支付宝二维码） ----------
-async function loadQRCodes() {
-    document.querySelectorAll('.qrcode-placeholder').forEach(placeholder => {
-        const phone = placeholder.dataset.phone;
-        const imgUrl = `/qrcode/${phone}`;
-        fetch(imgUrl, { method: 'HEAD' }).then(res => {
-            if (res.ok) {
-                placeholder.innerHTML = `<img src="${imgUrl}" width="100" height="100" class="img-thumbnail" title="支付二维码" style="cursor:pointer" data-bs-toggle="modal" data-bs-target="#qrModal" data-img="${imgUrl}">`;
-            } else {
-                placeholder.innerHTML = '<span class="text-muted small">未支付</span>';
-            }
-        }).catch(() => {
-            placeholder.innerHTML = '<span class="text-muted small">加载失败</span>';
-        });
-    });
 }
 
 // ---------- 全局配置加载与保存 ----------
@@ -979,15 +952,9 @@ async function updateStats() {
         document.getElementById('stat-offline').innerText = stats.offline;
         document.getElementById('stat-never').innerText = stats.never_login;
         document.getElementById('stat-bid').innerText = stats.bid_success;
-        document.getElementById('stat-qrcode').innerText = stats.qrcode_count;
         document.getElementById('stat-white').innerText = stats.white_count || 0;
         document.getElementById('stat-black').innerText = stats.black_count || 0;
-        // IP统计
-        document.getElementById('stat-ip-count').innerText = (stats.ip_bound_count || 0);
-        document.getElementById('stat-ip-ready').innerText = (stats.ip_ready_pool_count || 0);
-        document.getElementById('stat-ip-pool').innerText = (stats.ip_pool_count || 0);
-        document.getElementById('stat-ip-bound').innerText = (stats.ip_bound_count || 0);
-        document.getElementById('stat-ip-unique').innerText = (stats.ip_unique_count || 0);
+
         // 团队统计
         document.getElementById('stat-team-total').innerText = stats.team_total_accounts || 0;
         document.getElementById('stat-team-bid').innerText = stats.team_bid_success || 0;
@@ -1096,7 +1063,6 @@ async function clearBlackAccounts() {
 
 // 初始加载
 updateStats();
-loadQRCodes();
 bindRowEvents();
 updateSendButtons();
 

@@ -69,8 +69,8 @@ echo "  依赖就绪"
 
 # 4. 拉取源文件（带重试，开机自动获取最新）
 echo ">>> 下载源文件..."
-mkdir -p "$DIR/logs" "$DIR/data/nurture/har_learned" "$DIR/services"
-for F in moutai_client_worker.py demo.py crypto.py nurture_account.py _security_bodies.py; do
+mkdir -p "$DIR/logs" "$DIR/services"
+for F in moutai_client_worker.py demo.py crypto.py _security_bodies.py; do
     curl -sL --max-time 30 --retry 3 "$BASE_URL/$F" -o "$DIR/$F"
     [ -s "$DIR/$F" ] || { echo "!!! 下载失败: $F"; exit 1; }
 done

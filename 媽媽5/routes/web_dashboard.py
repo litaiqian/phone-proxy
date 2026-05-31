@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-路由 — 仪表盘 + 二维码 + 数据导出
+路由 — 仪表盘 + 数据导出
 """
 import os
 import datetime
@@ -10,12 +10,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from sqlalchemy.orm import Session
 import pandas as pd
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord, Team, TeamAccount
-from core.database import get_user_config
-from config import QRCODE_FOLDER, UPLOAD_FOLDER
-
 router = APIRouter(tags=["仪表盘"])
+
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord, Team, TeamAccount, get_user_config, UPLOAD_FOLDER  # noqa: E402
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -49,14 +47,6 @@ async def dashboard(request: Request, user: User = Depends(get_current_user),
     })
 
 
-@router.get("/qrcode/{phone}")
-async def get_qrcode(phone: str, user: User = Depends(get_current_user)):
-    qrcode_file = os.path.join(QRCODE_FOLDER, f"{phone}.png")
-    if os.path.exists(qrcode_file):
-        return FileResponse(qrcode_file)
-    raise HTTPException(status_code=404)
-
-
 @router.get("/api/stats")
 async def stats(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     filter_uploader = request.query_params.get('uploader', '').strip()
@@ -73,10 +63,6 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: Se
                                 (PhoneRecord.token != '') | (PhoneRecord.cookie != '')).count()
     never_login = base_query.filter(PhoneRecord.logged_in == False,
                                     PhoneRecord.token == '', PhoneRecord.cookie == '').count()
-    qrcode_count = 0
-    for rec in base_query.all():
-        if os.path.exists(os.path.join(QRCODE_FOLDER, f"{rec.phone}.png")):
-            qrcode_count += 1
     bid_success = base_query.filter(PhoneRecord.bid_result.contains('成功')).count()
 
     all_records_for_type = base_query.all()
@@ -92,7 +78,7 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: Se
     active_client_windows = 0
     try:
         import httpx
-        from config import Config
+        from moutai_automation import Config
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get('http://127.0.0.1:5000/api/client/active_windows',
                                     headers={'X-API-TOKEN': Config.API_TOKEN})
@@ -131,7 +117,7 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: Se
 
     return JSONResponse(content={
         'total': total, 'success_login': success_login, 'offline': offline,
-        'never_login': never_login, 'bid_success': bid_success, 'qrcode_count': qrcode_count,
+        'never_login': never_login, 'bid_success': bid_success,
         'multi_open_count': cfg.multi_open_count, 'multi_open_enabled': cfg.multi_open_enabled,
         'active_client_windows': active_client_windows, 'logged_in_count': logged_in_count,
         'total_windows': total_windows, 'white_count': white_count, 'black_count': black_count,

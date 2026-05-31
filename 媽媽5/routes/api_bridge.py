@@ -8,13 +8,13 @@ import hashlib
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from config import Config
-from demo import (
+router = APIRouter(tags=["桥接"])
+
+from moutai_automation import Config  # noqa: E402
+from demo import (  # noqa: E402
     MoutaiClient, _get, _post,
     generate_bs_device_id, BASE_URL
 )
-
-router = APIRouter(tags=["桥接"])
 
 
 def _bridge_build_client(data: dict) -> MoutaiClient:

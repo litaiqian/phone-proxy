@@ -8,11 +8,11 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord
-from core.database import get_user_config, get_user_proxy
-
 router = APIRouter(tags=["配置管理"])
+
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord  # noqa: E402
+from moutai_automation import get_user_config, get_user_proxy  # noqa: E402
 
 
 @router.get("/api/get_config")

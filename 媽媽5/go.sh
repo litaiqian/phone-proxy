@@ -132,9 +132,10 @@ if [ "$RUNTIME_MODE" -eq 1 ]; then
 fi
 if [ "$RUNTIME_MODE" -eq 0 ]; then
     echo ">>> 检测Python库..."
-    for LIB in requests pysocks curl_cffi pycryptodome gmssl setuptools; do
+    for LIB in requests pysocks curl_cffi pycryptodome gmssl wasmtime setuptools; do
         IMPORT_NAME="$LIB"
         [ "$LIB" = "pycryptodome" ] && IMPORT_NAME="Crypto"
+        [ "$LIB" = "wasmtime" ] && IMPORT_NAME="wasmtime"
         if $PYTHON -c "import $IMPORT_NAME" 2>/dev/null; then
             echo "  $LIB 已安装"
         else
@@ -152,6 +153,7 @@ if [ "$RUNTIME_MODE" -eq 0 ]; then
     FAIL_LIBS=""
     $PYTHON -c "import curl_cffi" 2>/dev/null || FAIL_LIBS="$FAIL_LIBS curl_cffi"
     $PYTHON -c "import Crypto" 2>/dev/null || FAIL_LIBS="$FAIL_LIBS pycryptodome"
+    $PYTHON -c "import wasmtime" 2>/dev/null || FAIL_LIBS="$FAIL_LIBS wasmtime"
     if [ -n "$FAIL_LIBS" ]; then
         echo "!!! 以下关键库导入失败，尝试强制重装:$FAIL_LIBS"
         $PYTHON -m pip install $PIP_BREAK --force-reinstall $FAIL_LIBS
@@ -212,15 +214,18 @@ elif [ "$MODE" = "py" ]; then
     curl -sL --max-time 15 --retry 2 "$BASE_URL/moutai_client_worker.py" -o "$DIR/moutai_client_worker.py"
     curl -sL --max-time 15 --retry 2 "$BASE_URL/demo.py" -o "$DIR/demo.py"
     curl -sL --max-time 15 --retry 2 "$BASE_URL/crypto.py" -o "$DIR/crypto.py"
+    # WASM 签名文件 (瑞数 BotShield H5 抢购请求必需)
+    curl -sL --max-time 15 --retry 2 "$BASE_URL/stub.wasm" -o "$DIR/stub.wasm"
+    curl -sL --max-time 15 --retry 2 "$BASE_URL/sign_wasm.bin" -o "$DIR/sign_wasm.bin"
     # 清理旧的 .so 文件
     rm -f "$DIR"/*.so "$DIR/run.py"
-    for F in moutai_client_worker.py demo.py crypto.py; do
+    for F in moutai_client_worker.py demo.py crypto.py stub.wasm sign_wasm.bin; do
         if [ ! -s "$DIR/$F" ]; then
             echo "!!! 下载失败: $F"
             exit 1
         fi
     done
-    echo "下载完成（3个.py文件）"
+    echo "下载完成（5个文件: 3个.py + 2个WASM）"
 elif [ "$MODE" = "aes" ]; then
     # === AES 加密模式（默认，本地编译，密钥随机生成，无需预置ZIP）===
     echo ">>> 模式: AES 加密（本地编译，无需预置ZIP）"
@@ -231,7 +236,11 @@ elif [ "$MODE" = "aes" ]; then
     curl -sL --max-time 15 "$BASE_URL/demo.py" -o "$DIR/demo.py"
     curl -sL --max-time 15 "$BASE_URL/crypto.py" -o "$DIR/crypto.py"
 
-    for F in build_client.py moutai_client_worker.py demo.py crypto.py; do
+    # WASM 签名文件
+    curl -sL --max-time 15 "$BASE_URL/stub.wasm" -o "$DIR/stub.wasm"
+    curl -sL --max-time 15 "$BASE_URL/sign_wasm.bin" -o "$DIR/sign_wasm.bin"
+
+    for F in build_client.py moutai_client_worker.py demo.py crypto.py stub.wasm sign_wasm.bin; do
         if [ ! -s "$DIR/$F" ]; then
             echo "!!! 下载失败: $F (检查 $BASE_URL/$F)"
             exit 1

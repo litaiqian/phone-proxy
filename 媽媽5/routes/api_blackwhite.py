@@ -9,11 +9,11 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord
-from demo import MoutaiClient, generate_h5_did, generate_h5_start_id, generate_bs_device_id
-
 router = APIRouter(tags=["白号/黑号"])
+
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord  # noqa: E402
+from demo import MoutaiClient, generate_h5_did, generate_h5_start_id, generate_bs_device_id  # noqa: E402
 
 
 def _build_client(phone: str, db: Session) -> MoutaiClient:

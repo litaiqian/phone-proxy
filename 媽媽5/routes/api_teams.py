@@ -12,11 +12,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord, Team, TeamMember, TeamAccount
-from config import Config, BASEDIR
-
 router = APIRouter(tags=["团队管理"])
+
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord, Team, TeamMember, TeamAccount, Config, BASEDIR  # noqa: E402
 
 
 # ---------- 团队 CRUD ----------

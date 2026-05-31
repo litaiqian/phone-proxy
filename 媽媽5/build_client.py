@@ -36,8 +36,257 @@ def _find_package_path(pkg_name):
         return None
 
 
+# ===================== 共享常量 =====================
+
+# Nuitka 编译时需跳过的 C 扩展（避免编译崩溃，后续手动复制）
+NUITKA_NOFOLLOW_ARGS = [
+    '--nofollow-import-to=Crypto',
+    '--nofollow-import-to=Crypto.Cipher',
+    '--nofollow-import-to=Crypto.PublicKey',
+    '--nofollow-import-to=Crypto.Util',
+    '--nofollow-import-to=Crypto.IO',
+    '--nofollow-import-to=Crypto.Hash',
+    '--nofollow-import-to=Crypto.Random',
+    '--nofollow-import-to=curl_cffi',
+    '--nofollow-import-to=curl_cffi.requests',
+    '--nofollow-import-to=curl_cffi.const',
+    '--nofollow-import-to=curl_cffi.curl',
+    '--nofollow-import-to=curl_cffi.aio',
+    '--nofollow-import-to=curl_cffi.utils',
+    '--nofollow-import-to=curl_cffi.__version__',
+]
+
+C_EXTENSION_PACKAGES = ['Crypto', 'curl_cffi', '_cffi_backend', 'wasmtime']
+
+WASM_FILES = ['stub.wasm', 'sign_wasm.bin']
+
+
+# ===================== 辅助函数 =====================
+
+def _inject_config(source, user_id, server, token):
+    """注入用户配置到源码字符串"""
+    source = re.sub(r'BAKED_USER_ID\s*=\s*0', f'BAKED_USER_ID = {user_id}', source)
+    source = source.replace('SERVER_BASE_URL = "http://ipla.top:5000"', f'SERVER_BASE_URL = "{server}"')
+    source = source.replace('API_TOKEN = "your-secure-token-change-me"', f'API_TOKEN = "{token}"')
+    return source
+
+
+def _copy_c_extensions(dist_dir):
+    """复制 C 扩展包到 dist 目录"""
+    for pkg_name in C_EXTENSION_PACKAGES:
+        pkg_path = _find_package_path(pkg_name)
+        if not pkg_path:
+            print(f'  [警告] 未找到 {pkg_name}，跳过')
+            continue
+        if os.path.isdir(pkg_path):
+            dest = os.path.join(dist_dir, os.path.basename(pkg_path))
+            if os.path.exists(dest):
+                shutil.rmtree(dest)
+            shutil.copytree(pkg_path, dest)
+            print(f'  {pkg_name}/ -> OK')
+        elif os.path.isfile(pkg_path):
+            dest = os.path.join(dist_dir, os.path.basename(pkg_path))
+            shutil.copy2(pkg_path, dest)
+            print(f'  {os.path.basename(pkg_path)} -> OK')
+
+
+def _copy_wasm_files(dest_dir):
+    """复制 WASM 签名文件到目标目录"""
+    for wasm_file in WASM_FILES:
+        wasm_src = os.path.join(BASEDIR, wasm_file)
+        if os.path.exists(wasm_src):
+            shutil.copy2(wasm_src, os.path.join(dest_dir, wasm_file))
+            print(f'  {wasm_file} ({os.path.getsize(wasm_src)} bytes) -> OK')
+        else:
+            print(f'  [警告] {wasm_file} 不存在，跳过')
+
+
+def _copy_services_dir(build_dir):
+    """复制 services/ 目录（跳过 __pycache__）"""
+    svc_src = os.path.join(BASEDIR, 'services')
+    svc_dst = os.path.join(build_dir, 'services')
+    if os.path.isdir(svc_src):
+        if os.path.exists(svc_dst):
+            shutil.rmtree(svc_dst)
+        shutil.copytree(svc_src, svc_dst,
+                       ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        print('  services/ 已复制')
+
+
+def _generate_setup_sh(build_dir, user_id, mode, startup_cmd):
+    """生成 setup.sh 一键部署脚本。startup_cmd: 启动命令，如 'exec ... run.py'"""
+    download_url = f'http://ipla.top:6789/moutai_client_{mode}_u{user_id}.zip'
+    # bash 模板中的 {{ 和 }} 是 Python f-string 对 bash ${} 的转义
+    setup_sh = f'''#!/bin/bash
+# ==========================================
+# 客户端 - 一键部署（systemd 开机自启 + 自动拉取最新）
+# ==========================================
+set -e
+
+INSTALL_DIR="/opt/moutai"
+SERVICE_NAME="moutai-client"
+MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
+DOWNLOAD_URL="{download_url}"
+
+echo ">>> 检查 Python 环境..."
+PYTHON=$(which python3 2>/dev/null || which python 2>/dev/null)
+if [ -z "$PYTHON" ]; then
+    echo "未找到 Python，正在安装..."
+    apt update -qq && apt install -y python3 python3-pip
+    PYTHON=$(which python3)
+fi
+$PYTHON --version
+
+echo ""
+echo ">>> 逐项检测依赖包（跳过已安装）..."
+
+PACKAGES=(
+    "requests|requests"
+    "Crypto|pycryptodome"
+    "curl_cffi|curl_cffi"
+    "gmssl|gmssl"
+    "socks|PySocks"
+)
+
+for entry in "${{PACKAGES[@]}}"; do
+    IMP="${{entry%%|*}}"
+    PKG="${{entry##*|}}"
+    if $PYTHON -c "import $IMP" 2>/dev/null; then
+        echo "  [OK] $PKG 已安装"
+    else
+        echo "  [安装] $PKG ..."
+        $PYTHON -m pip install -q "$PKG" -i "$MIRROR" --trusted-host pypi.tuna.tsinghua.edu.cn
+        if [ $? -ne 0 ]; then
+            echo "  [重试] $PKG (默认源)..."
+            $PYTHON -m pip install -q "$PKG" --break-system-packages 2>/dev/null || $PYTHON -m pip install -q "$PKG"
+        fi
+    fi
+done
+
+echo ""
+echo ">>> 检查 Linux 系统依赖 (curl_cffi 需要)..."
+for LIB in libcurl4 libssl3 ca-certificates; do
+    if ! dpkg -s "$LIB" >/dev/null 2>&1; then
+        echo "  [安装] $LIB ..."
+        apt install -y -qq "$LIB" 2>/dev/null || true
+    fi
+done
+
+echo ""
+echo ">>> 安装到 $INSTALL_DIR ..."
+mkdir -p "$INSTALL_DIR"
+systemctl stop $SERVICE_NAME 2>/dev/null || true
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/"
+
+echo ">>> 生成开机启动脚本（每次开机自动从网盘拉取最新包）..."
+cat > "$INSTALL_DIR/start.sh" << 'START_EOF'
+#!/bin/bash
+# 每次开机自动从网盘拉取最新并启动
+set -e
+
+INSTALL_DIR="__INSTALL_DIR__"
+DOWNLOAD_URL="__DOWNLOAD_URL__"
+MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
+
+echo "[$(date)] 开机启动 - 从网盘拉取最新包..."
+
+# 下载最新 zip
+cd /tmp
+rm -f moutai_latest.zip
+if wget -q -O moutai_latest.zip "$DOWNLOAD_URL" 2>/dev/null; then
+    echo "[$(date)] 下载成功"
+    python3 -c "
+import zipfile
+z = zipfile.ZipFile('/tmp/moutai_latest.zip')
+z.extractall('$INSTALL_DIR')
+z.close()
+"
+    rm -f /tmp/moutai_latest.zip
+else
+    echo "[$(date)] 下载失败，使用本地缓存"
+fi
+
+# 检查依赖（缺失才装）
+for entry in "requests|requests" "Crypto|pycryptodome" "curl_cffi|curl_cffi" "gmssl|gmssl" "socks|PySocks"; do
+    IMP="${{entry%%|*}}"
+    PKG="${{entry##*|}}"
+    if ! python3 -c "import $IMP" 2>/dev/null; then
+        python3 -m pip install -q "$PKG" -i "$MIRROR" --trusted-host pypi.tuna.tsinghua.edu.cn 2>/dev/null || \\
+        python3 -m pip install -q "$PKG" 2>/dev/null || true
+    fi
+done
+
+mkdir -p "$INSTALL_DIR/logs"
+echo "[$(date)] 启动客户端..."
+cd "$INSTALL_DIR"
+{startup_cmd}
+START_EOF
+
+sed -i "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$INSTALL_DIR/start.sh"
+sed -i "s|__DOWNLOAD_URL__|$DOWNLOAD_URL|g" "$INSTALL_DIR/start.sh"
+chmod +x "$INSTALL_DIR/start.sh"
+
+echo ">>> 创建 systemd 服务..."
+cat > /etc/systemd/system/$SERVICE_NAME.service << SERVICE_EOF
+[Unit]
+Description=Moutai Client Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/moutai
+ExecStart=/bin/bash /opt/moutai/start.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/moutai/logs/stdout.log
+StandardError=append:/opt/moutai/logs/stderr.log
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+mkdir -p "$INSTALL_DIR/logs"
+
+echo ">>> 启用开机自启..."
+systemctl daemon-reload
+systemctl enable $SERVICE_NAME
+systemctl restart $SERVICE_NAME
+sleep 2
+STATUS=$(systemctl is-active $SERVICE_NAME)
+
+echo ""
+echo "========================================="
+echo " 部署状态: $STATUS"
+echo " 网盘地址: $DOWNLOAD_URL"
+echo ""
+echo " 管理命令:"
+echo "  状态: systemctl status $SERVICE_NAME"
+echo "  日志: tail -f $INSTALL_DIR/logs/stdout.log"
+echo "  停止: systemctl stop $SERVICE_NAME"
+echo "  启动: systemctl start $SERVICE_NAME"
+echo "  重启: systemctl restart $SERVICE_NAME"
+echo ""
+echo " 更新方式: 替换网盘上的 zip，然后 reboot 或 systemctl restart"
+echo "========================================="
+'''
+    setup_path = os.path.join(build_dir, 'setup.sh')
+    with open(setup_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(setup_sh)
+    os.chmod(setup_path, 0o755)
+    print('  setup.sh 已生成')
+
+
+def _clean_build(dist_dir, zip_path):
+    """清理旧构建产物"""
+    if os.path.exists(dist_dir):
+        shutil.rmtree(dist_dir)
+    if os.path.exists(zip_path):
+        os.remove(zip_path)
+
+
 def build_exe(user_id: int, server: str = 'http://ipla.top:5000',
-              bridge: str = 'http://ipla.top:5000',
               token: str = 'your-secure-token-change-me') -> Optional[str]:
     """
     为指定用户构建客户端（standalone + ZIP）
@@ -50,17 +299,10 @@ def build_exe(user_id: int, server: str = 'http://ipla.top:5000',
     dist_dir = os.path.join(BUILDS_DIR, 'moutai_client_baked.dist')
     zip_path = os.path.join(BUILDS_DIR, f'{exe_name}.zip')
 
-    # 1. 读取源码
+    # 1. 读取并注入配置
     with open(SOURCE_FILE, 'r', encoding='utf-8') as f:
-        source = f.read()
+        source = _inject_config(f.read(), user_id, server, token)
 
-    # 2. 注入用户配置
-    source = re.sub(r'BAKED_USER_ID\s*=\s*0', f'BAKED_USER_ID = {user_id}', source)
-    source = source.replace('SERVER_BASE_URL = "http://ipla.top:5000"', f'SERVER_BASE_URL = "{server}"')
-    source = source.replace('BRIDGE_BASE_URL = "http://ipla.top:5000"', f'BRIDGE_BASE_URL = "{bridge}"')
-    source = source.replace('API_TOKEN = "your-secure-token-change-me"', f'API_TOKEN = "{token}"')
-
-    # 3. 写入临时文件
     tmp_dir = tempfile.mkdtemp(prefix='moutai_build_')
     tmp_source = os.path.join(tmp_dir, 'moutai_client_baked.py')
     with open(tmp_source, 'w', encoding='utf-8') as f:
@@ -71,12 +313,9 @@ def build_exe(user_id: int, server: str = 'http://ipla.top:5000',
     shutil.copy2(CRYPTO_FILE, os.path.join(tmp_dir, 'crypto.py'))
 
     # 4. 清理旧构建
-    if os.path.exists(dist_dir):
-        shutil.rmtree(dist_dir)
-    if os.path.exists(zip_path):
-        os.remove(zip_path)
+    _clean_build(dist_dir, zip_path)
 
-    # 5. Nuitka 编译（standalone + 跳过 curl_cffi 编译）
+    # 5. Nuitka 编译
     cmd = [
         sys.executable, '-m', 'nuitka',
         '--standalone',
@@ -89,21 +328,7 @@ def build_exe(user_id: int, server: str = 'http://ipla.top:5000',
         '--include-module=demo',
         '--include-module=crypto',
         '--include-package=gmssl',
-        # Crypto/pycryptodome 和 curl_cffi 的 C 扩展导致 Nuitka 崩溃，跳过编译后手动复制
-        '--nofollow-import-to=Crypto',
-        '--nofollow-import-to=Crypto.Cipher',
-        '--nofollow-import-to=Crypto.PublicKey',
-        '--nofollow-import-to=Crypto.Util',
-        '--nofollow-import-to=Crypto.IO',
-        '--nofollow-import-to=Crypto.Hash',
-        '--nofollow-import-to=Crypto.Random',
-        '--nofollow-import-to=curl_cffi',
-        '--nofollow-import-to=curl_cffi.requests',
-        '--nofollow-import-to=curl_cffi.const',
-        '--nofollow-import-to=curl_cffi.curl',
-        '--nofollow-import-to=curl_cffi.aio',
-        '--nofollow-import-to=curl_cffi.utils',
-        '--nofollow-import-to=curl_cffi.__version__',
+        *NUITKA_NOFOLLOW_ARGS,
         tmp_source
     ]
 
@@ -136,23 +361,13 @@ def build_exe(user_id: int, server: str = 'http://ipla.top:5000',
         print('[打包] 失败: EXE未生成')
         return None
 
-    # 7. 复制 curl_cffi + _cffi_backend 到 dist 目录
+    # 7. 复制 C 扩展包
     print('[打包] 复制 C 扩展包...')
-    for pkg_name in ['Crypto', 'curl_cffi', '_cffi_backend']:
-        pkg_path = _find_package_path(pkg_name)
-        if not pkg_path:
-            print(f'  [警告] 未找到 {pkg_name}，跳过')
-            continue
-        if os.path.isdir(pkg_path):
-            dest = os.path.join(dist_dir, os.path.basename(pkg_path))
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            shutil.copytree(pkg_path, dest)
-            print(f'  {pkg_name}/ -> OK')
-        elif os.path.isfile(pkg_path):
-            dest = os.path.join(dist_dir, os.path.basename(pkg_path))
-            shutil.copy2(pkg_path, dest)
-            print(f'  {os.path.basename(pkg_path)} -> OK')
+    _copy_c_extensions(dist_dir)
+
+    # 7.5 复制 WASM 签名文件
+    print('[打包] 复制 WASM 签名文件...')
+    _copy_wasm_files(dist_dir)
 
     # 8. ZIP 打包
     print('[打包] ZIP打包中...')
@@ -172,7 +387,6 @@ def build_exe(user_id: int, server: str = 'http://ipla.top:5000',
 
 
 def build_nuitka_linux(user_id: int, server: str = 'http://ipla.top:5000',
-                       bridge: str = 'http://ipla.top:5000',
                        token: str = 'm9Xk2vLp7Qr4Wn8YbT1cFh6Jd') -> Optional[str]:
     """
     Nuitka standalone 编译（Linux）→ 原生机器码，无需 Python 即可运行
@@ -204,11 +418,7 @@ def build_nuitka_linux(user_id: int, server: str = 'http://ipla.top:5000',
 
     # 2. 读取并注入配置
     with open(SOURCE_FILE, 'r', encoding='utf-8') as f:
-        source = f.read()
-    source = re.sub(r'BAKED_USER_ID\s*=\s*0', f'BAKED_USER_ID = {user_id}', source)
-    source = source.replace('SERVER_BASE_URL = "http://ipla.top:5000"', f'SERVER_BASE_URL = "{server}"')
-    source = source.replace('BRIDGE_BASE_URL = "http://ipla.top:5000"', f'BRIDGE_BASE_URL = "{bridge}"')
-    source = source.replace('API_TOKEN = "your-secure-token-change-me"', f'API_TOKEN = "{token}"')
+        source = _inject_config(f.read(), user_id, server, token)
 
     tmp_dir = tempfile.mkdtemp(prefix='moutai_nuitka_')
     tmp_source = os.path.join(tmp_dir, 'moutai_client_baked.py')
@@ -237,20 +447,7 @@ def build_nuitka_linux(user_id: int, server: str = 'http://ipla.top:5000',
         '--include-module=demo',
         '--include-module=crypto',
         '--include-package=gmssl',
-        '--nofollow-import-to=Crypto',
-        '--nofollow-import-to=Crypto.Cipher',
-        '--nofollow-import-to=Crypto.PublicKey',
-        '--nofollow-import-to=Crypto.Util',
-        '--nofollow-import-to=Crypto.IO',
-        '--nofollow-import-to=Crypto.Hash',
-        '--nofollow-import-to=Crypto.Random',
-        '--nofollow-import-to=curl_cffi',
-        '--nofollow-import-to=curl_cffi.requests',
-        '--nofollow-import-to=curl_cffi.const',
-        '--nofollow-import-to=curl_cffi.curl',
-        '--nofollow-import-to=curl_cffi.aio',
-        '--nofollow-import-to=curl_cffi.utils',
-        '--nofollow-import-to=curl_cffi.__version__',
+        *NUITKA_NOFOLLOW_ARGS,
         tmp_source
     ]
 
@@ -286,21 +483,11 @@ def build_nuitka_linux(user_id: int, server: str = 'http://ipla.top:5000',
 
     # 6. 复制 C 扩展（Nuitka 跳过了这些，手动补）
     print('[Nuitka] 复制 C 扩展包...')
-    for pkg_name in ['Crypto', 'curl_cffi', '_cffi_backend']:
-        pkg_path = _find_package_path(pkg_name)
-        if not pkg_path:
-            print(f'  [警告] 未找到 {pkg_name}')
-            continue
-        if os.path.isdir(pkg_path):
-            dest = os.path.join(dist_dir, os.path.basename(pkg_path))
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            shutil.copytree(pkg_path, dest)
-            print(f'  {pkg_name}/ -> OK')
-        elif os.path.isfile(pkg_path):
-            dest = os.path.join(dist_dir, os.path.basename(pkg_path))
-            shutil.copy2(pkg_path, dest)
-            print(f'  {os.path.basename(pkg_path)} -> OK')
+    _copy_c_extensions(dist_dir)
+
+    # 6.5 复制 WASM 签名文件 (瑞数 BotShield H5 抢购必需)
+    print('[Nuitka] 复制 WASM 签名文件...')
+    _copy_wasm_files(dist_dir)
 
     # 7. 创建 run.sh 启动脚本
     run_sh = os.path.join(BUILDS_DIR, 'run.sh')
@@ -332,7 +519,6 @@ def build_nuitka_linux(user_id: int, server: str = 'http://ipla.top:5000',
 
 
 def build_cython(user_id: int, server: str = 'http://ipla.top:5000',
-                 bridge: str = 'http://ipla.top:5000',
                  token: str = 'm9Xk2vLp7Qr4Wn8YbT1cFh6Jd') -> Optional[str]:
     """
     Cython 编译模式：将 Python 源码编译为 .so 共享库（Linux 部署用）
@@ -369,17 +555,7 @@ def build_cython(user_id: int, server: str = 'http://ipla.top:5000',
         # 2. 注入用户配置到 moutai_client_worker.py
         worker_path = os.path.join(build_dir, 'moutai_client_worker.py')
         with open(worker_path, 'r', encoding='utf-8') as f:
-            source = f.read()
-        source = re.sub(r'BAKED_USER_ID\s*=\s*0', f'BAKED_USER_ID = {user_id}', source)
-        source = source.replace(
-            'SERVER_BASE_URL = "http://ipla.top:5000"',
-            f'SERVER_BASE_URL = "{server}"')
-        source = source.replace(
-            'BRIDGE_BASE_URL = "http://ipla.top:5000"',
-            f'BRIDGE_BASE_URL = "{bridge}"')
-        source = source.replace(
-            'API_TOKEN = "your-secure-token-change-me"',
-            f'API_TOKEN = "{token}"')
+            source = _inject_config(f.read(), user_id, server, token)
         with open(worker_path, 'w', encoding='utf-8') as f:
             f.write(source)
         print(f'[Cython] 用户ID={user_id}  源码已注入（server={server}）')
@@ -464,7 +640,6 @@ if __name__ == '__main__':
 
 
 def build_plain(user_id: int, server: str = 'http://ipla.top:5000',
-               bridge: str = 'http://ipla.top:5000',
                token: str = 'm9Xk2vLp7Qr4Wn8YbT1cFh6Jd') -> Optional[str]:
     """
     纯源码打包模式：不加密，直接打包 .py 文件
@@ -482,182 +657,39 @@ def build_plain(user_id: int, server: str = 'http://ipla.top:5000',
         for src_file, dst_name in [(SOURCE_FILE, 'moutai_client_worker.py'),
                                     (DEMO_FILE, 'demo.py'),
                                     (CRYPTO_FILE, 'crypto.py'),
-                                    (os.path.join(BASEDIR, 'nurture_account.py'), 'nurture_account.py'),
                                     (os.path.join(BASEDIR, '_security_bodies.py'), '_security_bodies.py')]:
             shutil.copy2(src_file, os.path.join(build_dir, dst_name))
 
         # 2. 注入配置
         worker_path = os.path.join(build_dir, 'moutai_client_worker.py')
         with open(worker_path, 'r', encoding='utf-8') as f:
-            source = f.read()
-        source = re.sub(r'BAKED_USER_ID\s*=\s*0', f'BAKED_USER_ID = {user_id}', source)
-        source = source.replace('SERVER_BASE_URL = "http://ipla.top:5000"', f'SERVER_BASE_URL = "{server}"')
-        source = source.replace('BRIDGE_BASE_URL = "http://ipla.top:5000"', f'BRIDGE_BASE_URL = "{bridge}"')
-        source = source.replace(
-            'API_TOKEN = "your-secure-token-change-me"',
-            f'API_TOKEN = "{token}"')
+            source = _inject_config(f.read(), user_id, server, token)
         with open(worker_path, 'w', encoding='utf-8') as f:
             f.write(source)
         print(f'[Plain] 用户ID={user_id}  源码已注入（server={server}）')
 
         # 3. 复制 services/
-        svc_src = os.path.join(BASEDIR, 'services')
-        svc_dst = os.path.join(build_dir, 'services')
-        if os.path.isdir(svc_src):
-            if os.path.exists(svc_dst):
-                shutil.rmtree(svc_dst)
-            shutil.copytree(svc_src, svc_dst,
-                           ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-            print('[Plain] services/ 已复制')
+        _copy_services_dir(build_dir)
 
         # 4. 生成 setup.sh
-        download_url = f'http://ipla.top:6789/moutai_client_plain_u{user_id}.zip'
-        setup_sh = f'''#!/bin/bash
-set -e
-
-INSTALL_DIR="/opt/moutai"
-SERVICE_NAME="moutai-client"
-MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
-DOWNLOAD_URL="{download_url}"
-
-echo ">>> 检查 Python 环境..."
-PYTHON=$(which python3 2>/dev/null || which python 2>/dev/null)
-if [ -z "$PYTHON" ]; then
-    echo "未找到 Python，正在安装..."
-    apt update -qq && apt install -y python3 python3-pip
-    PYTHON=$(which python3)
-fi
-$PYTHON --version
-
-echo ""
-echo ">>> 逐项检测依赖包（跳过已安装）..."
-
-PACKAGES=(
-    "requests|requests"
-    "Crypto|pycryptodome"
-    "curl_cffi|curl_cffi"
-    "gmssl|gmssl"
-    "socks|PySocks"
-)
-
-for entry in "${{PACKAGES[@]}}"; do
-    IMP="${{entry%%|*}}"
-    PKG="${{entry##*|}}"
-    if $PYTHON -c "import $IMP" 2>/dev/null; then
-        echo "  [OK] $PKG 已安装"
-    else
-        echo "  [安装] $PKG ..."
-        $PYTHON -m pip install -q "$PKG" -i "$MIRROR" --trusted-host pypi.tuna.tsinghua.edu.cn
-        if [ $? -ne 0 ]; then
-            echo "  [重试] $PKG (默认源)..."
-            $PYTHON -m pip install -q "$PKG" --break-system-packages 2>/dev/null || $PYTHON -m pip install -q "$PKG"
-        fi
-    fi
-done
-
-echo ""
-echo ">>> 安装到 $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR"
-systemctl stop $SERVICE_NAME 2>/dev/null || true
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/"
-
-echo ">>> 生成开机启动脚本..."
-cat > "$INSTALL_DIR/start.sh" << 'START_EOF'
-#!/bin/bash
-set -e
-
-INSTALL_DIR="__INSTALL_DIR__"
-DOWNLOAD_URL="__DOWNLOAD_URL__"
-MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
-
-echo "[$(date)] 开机启动 - 从网盘拉取最新包..."
-cd /tmp
-rm -f moutai_latest.zip
-if wget -q -O moutai_latest.zip "$DOWNLOAD_URL" 2>/dev/null; then
-    echo "[$(date)] 下载成功"
-    python3 -c "
-import zipfile
-z = zipfile.ZipFile('/tmp/moutai_latest.zip')
-z.extractall('$INSTALL_DIR')
-z.close()
-"
-    rm -f /tmp/moutai_latest.zip
-else
-    echo "[$(date)] 下载失败，使用本地缓存"
-fi
-
-for entry in "requests|requests" "Crypto|pycryptodome" "curl_cffi|curl_cffi" "gmssl|gmssl" "socks|PySocks"; do
-    IMP="${{entry%%|*}}"
-    PKG="${{entry##*|}}"
-    if ! python3 -c "import $IMP" 2>/dev/null; then
-        python3 -m pip install -q "$PKG" -i "$MIRROR" --trusted-host pypi.tuna.tsinghua.edu.cn 2>/dev/null || true
-    fi
-done
-
-mkdir -p "$INSTALL_DIR/logs"
-echo "[$(date)] 启动客户端..."
-cd "$INSTALL_DIR"
-exec /usr/bin/python3 "$INSTALL_DIR/moutai_client_worker.py"
-START_EOF
-
-sed -i "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$INSTALL_DIR/start.sh"
-sed -i "s|__DOWNLOAD_URL__|$DOWNLOAD_URL|g" "$INSTALL_DIR/start.sh"
-chmod +x "$INSTALL_DIR/start.sh"
-
-echo ">>> 创建 systemd 服务..."
-cat > /etc/systemd/system/$SERVICE_NAME.service << SERVICE_EOF
-[Unit]
-Description=Moutai Client Worker
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/moutai
-ExecStart=/bin/bash /opt/moutai/start.sh
-Restart=always
-RestartSec=10
-StandardOutput=append:/opt/moutai/logs/stdout.log
-StandardError=append:/opt/moutai/logs/stderr.log
-
-[Install]
-WantedBy=multi-user.target
-SERVICE_EOF
-
-echo ">>> 启用开机自启..."
-systemctl daemon-reload
-systemctl enable $SERVICE_NAME
-systemctl start $SERVICE_NAME
-sleep 3
-
-echo ""
-echo "========================================="
-echo " 部署状态: $(systemctl is-active $SERVICE_NAME)"
-echo " 网盘地址: $DOWNLOAD_URL"
-echo ""
-echo " 管理命令:"
-echo "  状态: systemctl status $SERVICE_NAME"
-echo "  日志: tail -f $INSTALL_DIR/logs/stdout.log"
-echo "  停止: systemctl stop $SERVICE_NAME"
-echo "  重启: systemctl restart $SERVICE_NAME"
-echo " 客户端日志: ls $INSTALL_DIR/logs/"
-echo "========================================="
-'''
-        setup_path = os.path.join(build_dir, 'setup.sh')
-        with open(setup_path, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(setup_sh)
-        print('[Plain] setup.sh 已生成')
+        _generate_setup_sh(build_dir, user_id, 'plain',
+            'exec /usr/bin/python3 "$INSTALL_DIR/moutai_client_worker.py"')
 
         # 5. ZIP 打包
         print('[Plain] ZIP打包中...')
         if os.path.exists(zip_path):
             os.remove(zip_path)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for fname in ['moutai_client_worker.py', 'demo.py', 'crypto.py', 'nurture_account.py', '_security_bodies.py', 'setup.sh']:
+            for fname in ['moutai_client_worker.py', 'demo.py', 'crypto.py', '_security_bodies.py', 'setup.sh']:
                 fpath = os.path.join(build_dir, fname)
                 if os.path.exists(fpath):
                     zf.write(fpath, fname)
+            # WASM 签名文件
+            for wasm_file in ['stub.wasm', 'sign_wasm.bin']:
+                wasm_src = os.path.join(BASEDIR, wasm_file)
+                if os.path.exists(wasm_src):
+                    zf.write(wasm_src, wasm_file)
+                    print(f'  [Plain] {wasm_file} ({os.path.getsize(wasm_src)} bytes) -> OK')
             svc_dir = os.path.join(build_dir, 'services')
             if os.path.isdir(svc_dir):
                 for root, dirs, files in os.walk(svc_dir):
@@ -675,7 +707,6 @@ echo "========================================="
 
 
 def build_aes(user_id: int, server: str = 'http://ipla.top:5000',
-              bridge: str = 'http://ipla.top:5000',
               token: str = 'm9Xk2vLp7Qr4Wn8YbT1cFh6Jd') -> Optional[str]:
     """
     AES-256-GCM 加密模式：Python 源码加密为 .enc 文件（跨版本通用，秒级编译）
@@ -699,19 +730,12 @@ def build_aes(user_id: int, server: str = 'http://ipla.top:5000',
         for src_file, dst_name in [(SOURCE_FILE, 'moutai_client_worker.py'),
                                     (DEMO_FILE, 'demo.py'),
                                     (CRYPTO_FILE, 'crypto.py'),
-                                    (os.path.join(BASEDIR, 'nurture_account.py'), 'nurture_account.py'),
                                     (os.path.join(BASEDIR, '_security_bodies.py'), '_security_bodies.py')]:
             shutil.copy2(src_file, os.path.join(build_dir, dst_name))
 
         worker_path = os.path.join(build_dir, 'moutai_client_worker.py')
         with open(worker_path, 'r', encoding='utf-8') as f:
-            source = f.read()
-        source = re.sub(r'BAKED_USER_ID\s*=\s*0', f'BAKED_USER_ID = {user_id}', source)
-        source = source.replace('SERVER_BASE_URL = "http://ipla.top:5000"', f'SERVER_BASE_URL = "{server}"')
-        source = source.replace('BRIDGE_BASE_URL = "http://ipla.top:5000"', f'BRIDGE_BASE_URL = "{bridge}"')
-        source = source.replace(
-            'API_TOKEN = "your-secure-token-change-me"',
-            f'API_TOKEN = "{token}"')
+            source = _inject_config(f.read(), user_id, server, token)
         with open(worker_path, 'w', encoding='utf-8') as f:
             f.write(source)
         print(f'[AES] 用户ID={user_id}  源码已注入（server={server}）')
@@ -725,7 +749,6 @@ def build_aes(user_id: int, server: str = 'http://ipla.top:5000',
         enc_map = {'moutai_client_worker.py': 'worker.enc',
                     'demo.py': 'demo.enc',
                     'crypto.py': 'crypto.enc',
-                    'nurture_account.py': 'nurture.enc',
                     '_security_bodies.py': 'security.enc'}
         for src_name, enc_name in enc_map.items():
             src_path = os.path.join(build_dir, src_name)
@@ -771,7 +794,6 @@ def _load(mod_name, enc_name):
 _ = _load('crypto', 'crypto.enc')
 _ = _load('demo', 'demo.enc')
 _ = _load('_security_bodies', 'security.enc')
-_ = _load('nurture_account', 'nurture.enc')
 worker = _load('moutai_client_worker', 'worker.enc')
 
 if __name__ == '__main__' and hasattr(worker, 'main'):
@@ -783,189 +805,27 @@ if __name__ == '__main__' and hasattr(worker, 'main'):
         print('[AES] run.py 启动器已生成（密钥分片嵌入）')
 
         # 4.5 生成 setup.sh（自动检测+国内镜像+开机自动拉取最新包）
-        download_url = f'http://ipla.top:6789/moutai_client_aes_u{user_id}.zip'
-        setup_sh = f'''#!/bin/bash
-# ==========================================
-# 茅台客户端 - 一键部署（systemd 开机自启 + 自动拉取最新）
-# ==========================================
-set -e
-
-INSTALL_DIR="/opt/moutai"
-SERVICE_NAME="moutai-client"
-MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
-DOWNLOAD_URL="{download_url}"
-
-echo ">>> 检查 Python 环境..."
-PYTHON=$(which python3 2>/dev/null || which python 2>/dev/null)
-if [ -z "$PYTHON" ]; then
-    echo "未找到 Python，正在安装..."
-    apt update -qq && apt install -y python3 python3-pip
-    PYTHON=$(which python3)
-fi
-$PYTHON --version
-
-echo ""
-echo ">>> 逐项检测依赖包（跳过已安装）..."
-
-PACKAGES=(
-    "requests|requests"
-    "Crypto|pycryptodome"
-    "curl_cffi|curl_cffi"
-    "gmssl|gmssl"
-    "socks|PySocks"
-)
-
-for entry in "${{PACKAGES[@]}}"; do
-    IMP="${{entry%%|*}}"
-    PKG="${{entry##*|}}"
-    if $PYTHON -c "import $IMP" 2>/dev/null; then
-        echo "  [OK] $PKG 已安装"
-    else
-        echo "  [安装] $PKG ..."
-        $PYTHON -m pip install -q "$PKG" -i "$MIRROR" --trusted-host pypi.tuna.tsinghua.edu.cn
-        if [ $? -ne 0 ]; then
-            echo "  [重试] $PKG (默认源)..."
-            $PYTHON -m pip install -q "$PKG" --break-system-packages 2>/dev/null || $PYTHON -m pip install -q "$PKG"
-        fi
-    fi
-done
-
-echo ""
-echo ">>> 检查 Linux 系统依赖 (curl_cffi 需要)..."
-for LIB in libcurl4 libssl3 ca-certificates; do
-    if ! dpkg -s "$LIB" >/dev/null 2>&1; then
-        echo "  [安装] $LIB ..."
-        apt install -y -qq "$LIB" 2>/dev/null || true
-    fi
-done
-
-echo ""
-echo ">>> 安装到 $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR"
-systemctl stop $SERVICE_NAME 2>/dev/null || true
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/"
-
-echo ">>> 生成开机启动脚本（每次开机自动从网盘拉取最新包）..."
-cat > "$INSTALL_DIR/start.sh" << 'START_EOF'
-#!/bin/bash
-# 每次开机自动从网盘拉取最新并启动
-set -e
-
-INSTALL_DIR="__INSTALL_DIR__"
-DOWNLOAD_URL="__DOWNLOAD_URL__"
-MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
-
-echo "[$(date)] 开机启动 - 从网盘拉取最新包..."
-
-# 下载最新 zip
-cd /tmp
-rm -f moutai_latest.zip
-if wget -q -O moutai_latest.zip "$DOWNLOAD_URL" 2>/dev/null; then
-    echo "[$(date)] 下载成功"
-    # 用 Python 解压（兼容无 unzip 环境）
-    python3 -c "
-import zipfile, shutil, os
-z = zipfile.ZipFile('/tmp/moutai_latest.zip')
-z.extractall('$INSTALL_DIR')
-z.close()
-"
-    rm -f /tmp/moutai_latest.zip
-else
-    echo "[$(date)] 下载失败，使用本地缓存"
-fi
-
-# 检查依赖（缺失才装）
-for entry in "requests|requests" "Crypto|pycryptodome" "curl_cffi|curl_cffi" "gmssl|gmssl" "socks|PySocks"; do
-    IMP="${{entry%%|*}}"
-    PKG="${{entry##*|}}"
-    if ! python3 -c "import $IMP" 2>/dev/null; then
-        echo "[$(date)] 安装缺失依赖: $PKG"
-        python3 -m pip install -q "$PKG" -i "$MIRROR" --trusted-host pypi.tuna.tsinghua.edu.cn 2>/dev/null || \
-        python3 -m pip install -q "$PKG" 2>/dev/null || true
-    fi
-done
-
-mkdir -p "$INSTALL_DIR/logs"
-echo "[$(date)] 启动客户端..."
-cd "$INSTALL_DIR"
-exec /usr/bin/python3 "$INSTALL_DIR/run.py"
-START_EOF
-
-# 写入实际路径和下载地址
-sed -i "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$INSTALL_DIR/start.sh"
-sed -i "s|__DOWNLOAD_URL__|$DOWNLOAD_URL|g" "$INSTALL_DIR/start.sh"
-chmod +x "$INSTALL_DIR/start.sh"
-
-echo ">>> 创建 systemd 服务（指向 start.sh）..."
-cat > /etc/systemd/system/$SERVICE_NAME.service << SERVICE_EOF
-[Unit]
-Description=Moutai Client Worker
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/moutai
-ExecStart=/bin/bash /opt/moutai/start.sh
-Restart=always
-RestartSec=10
-StandardOutput=append:/opt/moutai/logs/stdout.log
-StandardError=append:/opt/moutai/logs/stderr.log
-
-[Install]
-WantedBy=multi-user.target
-SERVICE_EOF
-
-mkdir -p "$INSTALL_DIR/logs"
-
-echo ">>> 启用开机自启..."
-systemctl daemon-reload
-systemctl enable $SERVICE_NAME
-systemctl restart $SERVICE_NAME
-sleep 2
-STATUS=$(systemctl is-active $SERVICE_NAME)
-
-echo ""
-echo "========================================="
-echo " 部署状态: $STATUS"
-echo " 网盘地址: $DOWNLOAD_URL"
-echo ""
-echo " 管理命令:"
-echo "  状态: systemctl status $SERVICE_NAME"
-echo "  日志: tail -f $INSTALL_DIR/logs/stdout.log"
-echo "  停止: systemctl stop $SERVICE_NAME"
-echo "  启动: systemctl start $SERVICE_NAME"
-echo "  重启: systemctl restart $SERVICE_NAME"
-echo ""
-echo " 更新方式: 替换网盘上的 zip，然后 reboot 或 systemctl restart"
-echo "========================================="
-'''
-        setup_path = os.path.join(build_dir, 'setup.sh')
-        with open(setup_path, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(setup_sh)
-        os.chmod(setup_path, 0o755)
-        print('[AES] setup.sh 已生成（自动检测依赖 + 清华镜像 + systemd 开机自启）')
+        _generate_setup_sh(build_dir, user_id, 'aes',
+            'exec /usr/bin/python3 "$INSTALL_DIR/run.py"')
 
         # 4.6 复制 services/ 目录（非敏感模块，不加密）
-        svc_src = os.path.join(BASEDIR, 'services')
-        svc_dst = os.path.join(build_dir, 'services')
-        if os.path.isdir(svc_src):
-            if os.path.exists(svc_dst):
-                shutil.rmtree(svc_dst)
-            shutil.copytree(svc_src, svc_dst,
-                           ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-            print('[AES] services/ 已复制')
+        _copy_services_dir(build_dir)
 
         # 5. ZIP 打包
         print('[AES] ZIP打包中...')
         if os.path.exists(zip_path):
             os.remove(zip_path)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for fname in ['run.py', 'worker.enc', 'demo.enc', 'crypto.enc', 'nurture.enc', 'security.enc', 'setup.sh']:
+            for fname in ['run.py', 'worker.enc', 'demo.enc', 'crypto.enc', 'security.enc', 'setup.sh']:
                 fpath = os.path.join(build_dir, fname)
                 if os.path.exists(fpath):
                     zf.write(fpath, fname)
+            # WASM 签名文件 (不加密, wasmtime 运行时需要原始二进制)
+            for wasm_file in ['stub.wasm', 'sign_wasm.bin']:
+                wasm_src = os.path.join(BASEDIR, wasm_file)
+                if os.path.exists(wasm_src):
+                    zf.write(wasm_src, wasm_file)
+                    print(f'  [AES] {wasm_file} ({os.path.getsize(wasm_src)} bytes) -> OK')
             # 打包 services/ 目录
             svc_dir = os.path.join(build_dir, 'services')
             if os.path.isdir(svc_dir):
@@ -1035,7 +895,6 @@ if __name__ == '__main__':
     )
     parser.add_argument('--user-id', type=int, help='用户ID')
     parser.add_argument('--server', default='http://ipla.top:5000', help='服务端地址')
-    parser.add_argument('--bridge', default='http://ipla.top:5000', help='桥接地址')
     parser.add_argument('--token', default='your-secure-token-change-me', help='API Token')
     parser.add_argument('--all', action='store_true', help='为所有用户打包')
     parser.add_argument('--cython', action='store_true', help='Cython 模式（编译为 .so，适用于 Linux 部署）')
@@ -1066,17 +925,17 @@ if __name__ == '__main__':
         print(f'\n[批量打包] 完成: {success}/{len(results)} 成功')
     elif args.user_id:
         if mode == 'nuitka':
-            path = build_nuitka_linux(args.user_id, args.server, args.bridge, args.token)
+            path = build_nuitka_linux(args.user_id, args.server, args.token)
         elif mode == 'aes':
-            path = build_aes(args.user_id, args.server, args.bridge, args.token)
+            path = build_aes(args.user_id, args.server, args.token)
         elif mode == 'plain':
-            path = build_plain(args.user_id, args.server, args.bridge, args.token)
+            path = build_plain(args.user_id, args.server, args.token)
         elif mode == 'cython':
-            path = build_cython(args.user_id, args.server, args.bridge, args.token)
+            path = build_cython(args.user_id, args.server, args.token)
         elif mode == 'exe':
-            path = build_exe(args.user_id, args.server, args.bridge, args.token)
+            path = build_exe(args.user_id, args.server, args.token)
         else:
-            path = build_exe(args.user_id, args.server, args.bridge, args.token)
+            path = build_exe(args.user_id, args.server, args.token)
         if path:
             print(f'\n[OK] 下载路径: {path}')
         else:

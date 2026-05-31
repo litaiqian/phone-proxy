@@ -6,7 +6,7 @@
 """
 import base64
 import httpx
-from config import Config
+from moutai_automation import Config
 
 SLIDER_API_URL = Config.SLIDER_API_URL      # Express.js: http://127.0.0.1:8887
 OCR_SERVER_URL = Config.OCR_SERVER_URL      # Flask: http://127.0.0.1:9898

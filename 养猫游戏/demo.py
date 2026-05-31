@@ -880,27 +880,27 @@ if __name__ == "__main__":
 
         _save_account(accounts_path, mobile, client)
 
-    # # 2. 获取收货地址
-    # print("\n" + "=" * 50)
-    # addresses = client.get_addresses()
-    # if not addresses:
-    #     print("没有收货地址，请先在 APP 中添加")
-    #     exit(1)
+    # 2. 获取收货地址
+    print("\n" + "=" * 50)
+    addresses = client.get_addresses()
+    if not addresses:
+        print("没有收货地址，请先在 APP 中添加")
+        exit(1)
 
-    # if len(addresses) == 1:
-    #     selected_addr = addresses[0]
-    # else:
-    #     idx = input(f"\n选择地址序号 [0-{len(addresses)-1}]: ").strip()
-    #     selected_addr = addresses[int(idx) if idx else 0]
-    # print(f"使用地址: id={selected_addr['shipAddressId']} {selected_addr.get('fullAddress','')}")
+    if len(addresses) == 1:
+        selected_addr = addresses[0]
+    else:
+        idx = input(f"\n选择地址序号 [0-{len(addresses)-1}]: ").strip()
+        selected_addr = addresses[int(idx) if idx else 0]
+    print(f"使用地址: id={selected_addr['shipAddressId']} {selected_addr.get('fullAddress','')}")
 
     # 3. 抢购
     print("\n" + "=" * 50)
-    item_code = input("商品编码 (如 11679): ").strip()
-    act_id = input("活动ID (如 76145): ").strip()
-    amount = input("数量 (如 24): ").strip() or "1"
+    item_code = input("商品编码 (如 11679): ").strip()   # "skuId": "741",
+    act_id = input("活动ID (如 76145): ").strip()       # "itemPriorityActId": 85078,
+    amount = input("数量 (如 24): ").strip() or "1"     # 6瓶/箱
 
-    print()
+
     rush_result = None
     for attempt in range(1, 100001):
         print(f"--- 第 {attempt}/100000 次抢购 ---")
@@ -911,7 +911,7 @@ if __name__ == "__main__":
         )
         if isinstance(rush_result, dict) and rush_result.get("code") == 2000:
             break
-        time.sleep(0.8)
+        time.sleep(2.8)
 
     # 4. 组单 + 下单
     if rush_result.get("code") != 2000:

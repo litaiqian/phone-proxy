@@ -8,8 +8,8 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 
-from core.database import SessionLocal, get_user_config, get_user_proxy  # noqa: F401
-from models import User
+# 延迟导入 moutai_automation 的符号，避免循环导入
+# SessionLocal / User 在函数内部按需导入
 
 
 # 数据库不可用标志，启动时 init_db 失败会设为 True
@@ -27,6 +27,7 @@ def is_db_unavailable():
 
 def get_db():
     """FastAPI 依赖：获取数据库会话"""
+    from moutai_automation import SessionLocal
     global _db_unavailable
     if _db_unavailable:
         # 尝试重连：如果数据库恢复了，恢复服务
@@ -56,6 +57,7 @@ def get_db():
 
 async def db_unavailable_middleware(request: Request, call_next):
     """中间件：数据库不可用时拦截请求，返回友好提示"""
+    from moutai_automation import SessionLocal
     global _db_unavailable
     if _db_unavailable:
         # 尝试重连：如果数据库恢复了，放行请求
@@ -78,6 +80,7 @@ async def db_unavailable_middleware(request: Request, call_next):
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
     """FastAPI 依赖：获取当前登录用户，未登录则跳转 /login"""
+    from moutai_automation import User
     if db is None:
         raise HTTPException(status_code=status.HTTP_302_FOUND, headers={"Location": "/login"})
     user_id = request.session.get("user_id")
@@ -92,7 +95,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     return user
 
 
-def login_user(request: Request, user: User):
+def login_user(request: Request, user: "User"):
     """手动登录（写入 session）"""
     request.session["user_id"] = user.id
     request.session["permanent"] = True

@@ -13,6 +13,7 @@ import json
 import base64
 import re
 import struct
+from asyncio import timeout
 from datetime import datetime
 from urllib.parse import quote
 from curl_cffi import requests as cffi_requests
@@ -344,7 +345,7 @@ class MoutaiClient:
             is_rush_purchase=is_rush_purchase,
         )
 
-        # _d_u cookie (瑞数设备上报, 每 ~10 秒刷新, 每次调用重新生成)
+        # _d_u cookie (瑞数设备上报, 每 ~10 秒刷新)
         d_u = generate_d_u_cookie(self.h5_did, self.h5_start_id)
 
         # 完整 cookie: 包含 APP token + 瑞数防护 cookie
@@ -376,7 +377,7 @@ class MoutaiClient:
             "Sec-Fetch-Site": "same-origin",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Dest": "empty",
-            "Referer": referer or f"{H5_BASE_URL}/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006",
+            "Referer": referer or f"{H5_BASE_URL}/mt/item/hxx-detail?appConfig=2_1_2",
             "Accept-Encoding": "gzip, deflate, br",
             "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
             "Cookie": cookie_str,
@@ -767,33 +768,28 @@ class MoutaiClient:
 
     # ==================== 抢购 ====================
 
-    def rush_purchase(self, item_code: str, sku_id: str, item_priority_act_id: str,
-                      amount: str = "1", source_id: str = "", timeout: int = 30) -> dict:
+    def rush_purchase(self, item_code: str, item_priority_act_id: str,
+                      amount: str = "1", source_id: str = "",
+                      timeout: int = 4, spu_code: str = "") -> dict:
         """
-        抢购 (根据 HAR 包修正版)
+        抢购 (HAR方式: item_code=skuId, item_priority_act_id=actId)
 
         - 使用 H5 域名 h5.moutai519.com.cn
         - 使用瑞数 H5 防护头 (Content-Web-Bb / Content-Hh-Bb / Sdk-Ver-Bb)
         - actParam AES 加密
-        - 前置邦盛设备验证
         - 热门商品走 /hot/branch/{branch} 分链路
         - 按 item_code 匹配正确的 Referer 页面
+        - timeout: HTTP 请求超时秒数 (默认 4s)
+        - spu_code: SPU 商品码，用于 source_id 拼接 Referer
 
         POST https://h5.moutai519.com.cn/xhr/front/trade/priority/rushPurchase[/hot/branch/{branch}]
         body: {"actParam": "..."}
         """
-        # 0. 前置：邦盛设备验证
-        self.bangcle_verify()
-
-        # 1. 构造请求体 (与 HAR 真机完全对齐)
-        # HAR actParam 明文: {"amount":"1","itemCode":"10193","itemPriorityActId":82199,
-        #   "userInfoBaseContext":{"addressLat":"","addressLng":"",
-        #     "appUserAgent":"...","deviceId":"...","mtr":"..."},
-        #   "ydLogId":"","ydToken":""}
+        # 构造请求体 (与 HAR 真机完全对齐)
         data = {
-            "amount": str(amount),
+            "amount": amount,
             "itemCode": item_code,
-            "itemPriorityActId": int(item_priority_act_id),
+            "itemPriorityActId": item_priority_act_id,
             "userInfoBaseContext": {
                 "addressLat": "",
                 "addressLng": "",
@@ -804,13 +800,16 @@ class MoutaiClient:
             "ydLogId": "",
             "ydToken": "",
         }
+        print('\n数量:{}-----itemCode:{}-----itemPriorityActId:{}'.format(amount,item_code,item_priority_act_id))
 
-        # 2. 生成 actParam (AES 加密)
+        # 生成 actParam (AES 加密)
         act_param = generate_act_param(data)
         body = {"actParam": act_param}
 
-        # 3. 按 item_code 确定抢购 URL 和 Referer（热门商品走分支链路）
-        item_branch_map = {'741': 'one', '11947': 'two', '11945': 'two', '11942': 'two', '1741': 'three'}
+        # 按 item_code 确定抢购 URL 和 Referer（热门商品走分支链路）
+        item_branch_map = {
+            '741': 'one', '11947': 'two', '11945': 'two', '11942': 'two', '1741': 'three',
+        }
         branch = item_branch_map.get(str(item_code))
         base_rush_url = f"{H5_BASE_URL}/xhr/front/trade/priority/rushPurchase"
         rush_url = f"{base_rush_url}/hot/branch/{branch}" if branch else base_rush_url
@@ -830,60 +829,33 @@ class MoutaiClient:
             str(item_code),
             f'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2'
         )
-        if source_id:
+        # spu_code 用于拼接 sourceId（moutai_client_worker.py 传入）
+        if spu_code and not source_id:
+            referer += f"&sourceId={spu_code}"
+        elif source_id:
             referer += f"&sourceId={source_id}"
 
-        # 4. 使用 H5 Headers (Content-Web-Bb / Content-Hh-Bb / Sdk-Ver-Bb) - 与 HAR 一致
+        # 使用 H5 Headers (Content-Web-Bb / Content-Hh-Bb / Sdk-Ver-Bb) - 与 HAR 一致
         headers = self._h5_headers(body, referer=referer, is_rush_purchase=True)
 
-        # 5. 抢购 URL（热门商品走分支链路 /hot/branch/{branch}，普通商品直接走基础路径）
-        url = rush_url
+        # print(f"[抢购] itemCode={item_code}, actId={item_priority_act_id}, amount={amount}")
+        # print(f"[抢购] MT-K: {headers['MT-K']}")
+        # print(f"[抢购] Content-Hh-Bb: {headers['Content-Hh-Bb']}")
+        # print(f'抢购地址：url={rush_url}')
 
-        _phone = self.phone or ''
-
-        t_send = time.time()
-        try:
-            resp = _post(url, headers=headers, json=body, proxy=self.proxy, timeout=timeout)
-        except Exception as e:
-            return {"code": -1, "message": f"请求异常: {e}"}
-        t_recv = time.time()
-        rtt_half = (t_recv - t_send) / 2
-
-        # 解析响应（所有HTTP状态码都尝试解析JSON获取真实code/msg）
-        parsed_code = resp.status_code
-        parsed_msg = resp.text[:200] if resp.text else ''
-        raw_text = resp.text[:500] if resp.text else ''  # 完整原始响应（截取前500字符）
+        resp = _post(
+            rush_url,
+            headers=headers,
+            json=body,
+            timeout=timeout,
+            proxy=self.proxy,
+        )
         try:
             result = resp.json()
-            parsed_code = result.get("code", resp.status_code)
-            parsed_msg = result.get("message", "")
         except Exception:
-            result = None
-            # HTTP 429/403 无 body 时给出语义化提示
-            if resp.status_code == 429 and not resp.text:
-                parsed_msg = 'HTTP限流(Too Many Requests)'
-            elif resp.status_code == 403 and not resp.text:
-                parsed_msg = 'HTTP禁止访问(Forbidden)'
-
-        # 构建返回结果，始终携带原始响应信息
-        if resp.status_code in (200, 480) and result is not None:
-            ret = result
-        elif result is not None:
-            ret = {"code": parsed_code, "message": parsed_msg}
-        else:
-            ret = {"code": resp.status_code, "message": resp.text[:500] if resp.text else ''}
-        ret['_http_status'] = resp.status_code
-        ret['_raw_text'] = raw_text
-        # 提取目标站服务器时间（HTTP Date 响应头 秒级 → RTT/2 补偿估算毫秒）
-        try:
-            from email.utils import parsedate_to_datetime
-            from datetime import datetime
-            server_dt = parsedate_to_datetime(resp.headers.get('Date', ''))
-            server_ms = server_dt.timestamp() + rtt_half
-            ret['_server_time'] = datetime.fromtimestamp(server_ms).strftime('%H:%M:%S.%f')[:-3]
-        except Exception:
-            ret['_server_time'] = ''
-        return ret
+            result = {"code": resp.status_code, "raw": resp.text}
+        print(f"[抢购] 响应: {result}")
+        return result
 
     # ==================== 验证码校验 (网易易盾) ====================
 
@@ -924,215 +896,70 @@ class MoutaiClient:
             pass
         return result
 
-    # ==================== 直接下单（非抢购） ====================
-
-    def get_item_detail(self, item_code: str) -> dict:
-        """
-        获取商品详情（包括活动ID）
-        
-        GET /xhr/front/v2/item/detail/{itemCode}
-        """
-        headers = self._app_headers(need_sign=False)
-        # 尝试多个可能的 URL
-        urls_to_try = [
-            f"{H5_BASE_URL}/xhr/front/v2/item/detail/{item_code}",
-            f"{BASE_URL}/xhr/front/v2/item/detail/{item_code}",
-            f"{H5_BASE_URL}/xhr/front/item/detail/{item_code}",
-        ]
-        
-        print(f"[获取商品详情] itemCode={item_code}")
-        
-        for url in urls_to_try:
-            print(f"[尝试 URL] {url}")
-            try:
-                resp = _get(url, headers=headers)
-                
-                if resp.status_code != 200:
-                    print(f"  [跳过] HTTP {resp.status_code}")
-                    continue
-                
-                # 检查是否为 JSON
-                content_type = resp.headers.get('Content-Type', '')
-                if 'application/json' not in content_type and 'text/json' not in content_type:
-                    print(f"  [跳过] Content-Type: {content_type}")
-                    print(f"  [响应前100字符] {resp.text[:100]}")
-                    continue
-                
-                result = resp.json()
-                
-                if result.get("code") == 2000:
-                    item_info = result.get("data", {}).get("item", {})
-                    act_info = result.get("data", {}).get("actInfo", {})
-                    print(f"✓ [商品名称] {item_info.get('title', '')}")
-                    print(f"✓ [活动ID] {act_info.get('actId', '')}")
-                    return {
-                        "item_name": item_info.get("title", ""),
-                        "act_id": act_info.get("actId", ""),
-                        "full_data": result
-                    }
-                else:
-                    print(f"  [业务错误] code={result.get('code')}, msg={result.get('message', '')}")
-            except Exception as e:
-                print(f"  [异常] {e}")
-                continue
-        
-        print("✗ 所有 URL 尝试失败")
-        return {}
-
-    def direct_submit_order(self, store_id: str, spu_id: str, count: int,
-                           address: dict, deliver_method: int = -1) -> dict:
-        """
-        直接提交订单（模拟 App 真机下单 - 修正版）
-        """
-        # 1. 构造请求体
-        data = {
-            "deliverMethod": deliver_method,
-            "addressInfo": {
-                "shipAddressId": address.get("shipAddressId", 0),
-                "name": address.get("name", ""),
-                "mobile": address.get("mobile", ""),
-                "fullAddress": address.get("fullAddress", ""),
-                "provinceName": address.get("provinceName", ""),
-                "cityName": address.get("cityName", ""),
-                "districtName": address.get("districtName", "")
-            },
-            "itemList": [
-                {
-                    "storeId": store_id,
-                    "spuId": spu_id,
-                    "count": count
-                }
-            ]
-        }
-        
-        # 2. 生成 actParam (AES 加密)
-        act_param = generate_act_param(data)
-        body = {"actParam": act_param}
-        
-        # 3. 生成 App 请求头
-        headers = self._app_headers(need_sign=True)
-        headers.update({
-            "MT-Bundle-ID": "com.moutai.mall",
-            "content-type": "application/json",
-        })
-        
-        # 4. 使用 App 接口
-        url = f"{BASE_URL}/xhr/front/trade/order/standard/submit/v2"
-        
-        print(f"[直接下单] storeId={store_id}, spuId={spu_id}, count={count}")
-        print(f"[URL] {url}")
-        
-        resp = _post(url, headers=headers, json=body, proxy=self.proxy, timeout=timeout)
-        
-        print(f"[响应状态码] {resp.status_code}")
-        if resp.status_code != 200:
-            print(f"[错误] HTTP {resp.status_code}")
-            print(f"[响应内容] {resp.text[:500]}")
-            return {"code": resp.status_code, "message": f"HTTP {resp.status_code}"}
-        
-        try:
-            result = resp.json()
-            print(f"[直接下单] 响应: {result}")
-            return result
-        except Exception as e:
-            print(f"[解析失败] {e}")
-            return {"code": -1, "message": "响应解析失败"}
-
     # ==================== 下单 ====================
 
     def compose_order_v2(self, spu_id: str, count: int, priority_record_id: int,
-                        address_id: int = 0, deliver_method: int = 1,
-                        store_id: str = "0") -> dict:
+                         address_id: int = 0, deliver_method: int = 1,
+                         store_id: str = "0", shop_id: str = "",
+                         inventory_source: int = 0) -> dict:
         """
-        组单 (compose/v2) — 根据 HAR 真机 1.9.7 协议重写
-
-        POST app.moutai519.com.cn/xhr/front/trade/order/standard/compose/v2
-        Host: app.moutai519.com.cn  (APP 原生接口 + actParam 加密)
-
-        HAR 显示需要 3 次尝试：
-          1. deliverMethod=-1, shipAddressId=0  (试探)
-          2. deliverMethod=1, shipAddressId=0  (确认配送方式)
-          3. deliverMethod=1, shipAddressId=真实地址ID  (最终提交)
-
-        请求体 (仅包含必要字段，与 HAR 一致):
-        {
-            "deliverMethod": 1,
-            "addressInfo": {"shipAddressId": 40556284},
-            "itemList": [{"storeId": "0", "spuId": "10193", "count": 6}],
-            "actParam": "..."
-        }
+        组单 v2 (moutai_client_worker.py 调用的接口)
+        与 compose_order 一致，只是接收 address_id 而非整个 address dict。
         """
-        # 3 次尝试，与 HAR 真机一致
-        attempts = [
-            (-1, 0),           # 试探
-            (deliver_method, 0),    # 确认方式
-            (deliver_method, address_id),  # 最终
-        ]
+        return self.compose_order(
+            spu_id=spu_id, count=count, priority_record_id=priority_record_id,
+            address={"shipAddressId": address_id},
+            deliver_method=deliver_method, store_id=store_id,
+            shop_id=shop_id, inventory_source=inventory_source,
+        )
 
-        last_result = {}
-        for attempt_num, (dm, addr_id) in enumerate(attempts, 1):
-            data = {
-                "deliverMethod": dm,
-                "addressInfo": {"shipAddressId": addr_id},
-                "itemList": [
-                    {"storeId": store_id, "spuId": spu_id, "count": count}
-                ],
-            }
-            act_param = generate_act_param(data)
-            body = {"actParam": act_param}
-
-            # 使用 APP 原生 headers (与 HAR 一致，走 app 域名)
-            headers = self._app_headers(need_sign=True)
-            headers["Content-Type"] = "application/json; charset=UTF-8"
-
-            print(f"[组单v2] 第{attempt_num}次: spuId={spu_id}, count={count}, dm={dm}, addrId={addr_id}")
-            resp = _post(
-                f"{BASE_URL}/xhr/front/trade/order/standard/compose/v2",
-                headers=headers,
-                json=body,
-                proxy=self.proxy,
-            )
-            result = resp.json()
-            last_result = result
-            code = result.get("code")
-            if code == 2000:
-                data_result = result.get("data", {})
-                print(f"[组单v2] 成功! transactionId={data_result.get('transactionId')}, "
-                      f"actualPrice={data_result.get('orderPrice', {}).get('showActualPrice')}")
-                return result
-            print(f"[组单v2] 第{attempt_num}次失败: code={code}, msg={result.get('message')}")
-
-        return last_result
-
-    # 保持旧方法兼容（内部调用新方法）
     def compose_order(self, spu_id: str, count: int, priority_record_id: int,
                       address: dict, deliver_method: int = 1,
                       store_id: str = "0", shop_id: str = "",
                       inventory_source: int = 0) -> dict:
-        """组单 (兼容旧接口，内部使用 compose_order_v2)"""
-        addr_id = address.get("shipAddressId", 0) if isinstance(address, dict) else 0
-        return self.compose_order_v2(
-            spu_id=spu_id, count=count, priority_record_id=priority_record_id,
-            address_id=addr_id, deliver_method=deliver_method, store_id=store_id
+        """
+        组单 (compose)
+
+        POST /xhr/front/trade/order/standard/compose/v2
+        Host: app.moutai519.com.cn (走 H5 headers)
+        """
+        data = {
+            "deliverMethod": deliver_method,
+            "itemList": [
+                {"storeId": store_id, "spuId": spu_id, "count": count}
+            ],
+            "addressInfo": {"shipAddressId": address.get("shipAddressId", 0)},
+            "userPriorityInfo": {
+                "priorityRecordId": priority_record_id,
+                "shopId": shop_id,
+                "inventorySource": inventory_source,
+            },
+            "selfLatitude": "",
+            "selfLongitude": "",
+        }
+        act_param = generate_act_param(data)
+        body = {"actParam": act_param}
+        headers = self._h5_headers(body)
+
+        print(f"[组单] spuId={spu_id}, count={count}, addressId={address.get('shipAddressId')}")
+        resp = _post(
+            f"{BASE_URL}/xhr/front/trade/order/standard/compose/v2",
+            headers=headers,
+            json=body,
         )
+        result = resp.json()
+        print(f"[组单] 响应: code={result.get('code')}")
+        return result
 
     def submit_order(self, spu_id: str, count: int, priority_record_id: int,
                      address: dict, deliver_method: int = 1,
                      store_id: str = "0", shop_id: str = "",
                      inventory_source: int = 0) -> dict:
         """
-        提交订单 (standard/submit/v2) — 根据 HAR 真机 1.9.7 协议重写
+        提交订单 (standard/submit/v2)
 
-        POST app.moutai519.com.cn/xhr/front/trade/order/standard/submit/v2
-        Host: app.moutai519.com.cn  (APP 原生接口 + actParam 加密)
-
-        HAR 真机请求体 (极其精简，不含 addressInfo 和 userPriorityInfo):
-        {
-            "transactionId": "1067251570_22267164_compose",
-            "deliverMethod": 1,
-            "itemList": [{"storeId": "0", "spuId": "10193", "count": 6}],
-            "actParam": "..."
-        }
+        POST /xhr/front/trade/order/standard/submit/v2
+        Host: app.moutai519.com.cn (走 H5 headers)
         """
         transaction_id = f"{self.user_id}_{priority_record_id}_compose"
         data = {
@@ -1141,23 +968,43 @@ class MoutaiClient:
             "itemList": [
                 {"storeId": store_id, "spuId": spu_id, "count": count}
             ],
+            "addressInfo": {
+                "address": address.get("address", ""),
+                "cityId": address.get("cityId", ""),
+                "cityName": address.get("cityName", ""),
+                "dft": address.get("dft", False),
+                "districtId": address.get("districtId", ""),
+                "districtName": address.get("districtName", ""),
+                "fullAddress": address.get("fullAddress", ""),
+                "mobile": address.get("mobile", ""),
+                "name": address.get("name", ""),
+                "provinceId": address.get("provinceId", ""),
+                "provinceName": address.get("provinceName", ""),
+                "shipAddressId": address.get("shipAddressId", 0),
+                "townId": address.get("townId", ""),
+                "townName": address.get("townName", ""),
+                "userId": int(self.user_id) if self.user_id else 0,
+            },
+            "userPriorityInfo": {
+                "priorityRecordId": priority_record_id,
+                "shopId": shop_id,
+                "inventorySource": inventory_source,
+            },
+            "selfLatitude": "",
+            "selfLongitude": "",
         }
         act_param = generate_act_param(data)
         body = {"actParam": act_param}
+        headers = self._h5_headers(body)
 
-        # 使用 APP 原生 headers (与 HAR 一致，走 app 域名)
-        headers = self._app_headers(need_sign=True)
-        headers["Content-Type"] = "application/json; charset=UTF-8"
-
-        print(f"[下单v2] transactionId={transaction_id}")
+        print(f"[下单] transactionId={transaction_id}")
         resp = _post(
             f"{BASE_URL}/xhr/front/trade/order/standard/submit/v2",
             headers=headers,
             json=body,
-            proxy=self.proxy,
         )
         result = resp.json()
-        print(f"[下单v2] 响应: code={result.get('code')}, orderId={result.get('data', {}).get('orderId')}")
+        print(f"[下单] 响应: {result}")
         return result
 
     # ==================== 支付 ====================
@@ -1530,107 +1377,64 @@ if __name__ == "__main__":
     #     selected_addr = addresses[int(idx) if idx else 0]
     # print(f"使用地址: id={selected_addr['shipAddressId']} {selected_addr.get('fullAddress','')}")
 
-    # 3. 选择下单模式
+    # 3. 抢购模式 (HAR方式: item_code=skuId, act_id=itemPriorityActId)
+    # === 抢购模式 ===
     print("\n" + "=" * 50)
-    mode = input("请选择下单模式 (1=抢购模式 / 2=直接购买模式): ").strip()
-    
-    if mode == "2":
-        # === 直接购买模式（根据抓包数据） ===
-        store_id = input("门店ID (如 IMT0000000099): ").strip()
-        spu_id = input("商品ID (如 WC0050010002): ").strip()
-        count = int(input("数量 (如 1): ").strip() or "1")
-        
-        # 获取地址
-        addresses = client.get_addresses()
-        if not addresses:
-            print("未找到收货地址，请先添加地址")
-            exit(0)
-        
-        print(f"\n可用地址:")
-        for i, addr in enumerate(addresses):
-            default_mark = " [默认]" if addr.get("dft") else ""
-            print(f"  [{i}] {addr.get('fullAddress', '')} - {addr.get('name', '')} {addr.get('mobile', '')}{default_mark}")
-        
-        addr_idx = int(input(f"\n选择地址编号 (0-{len(addresses)-1}): ").strip() or "0")
-        selected_addr = addresses[addr_idx]
-        
-        print(f"\n使用地址: {selected_addr.get('fullAddress', '')}")
-        
-        # 直接下单
-        submit_result = client.direct_submit_order(
-            store_id=store_id,
-            spu_id=spu_id,
-            count=count,
-            address=selected_addr,
-            deliver_method=-1  # -1 表示快递配送
+    item_code = input("商品编码 (如 741): ").strip()   # skuId，即 purchaseInfoMap 的 key
+    act_id = input("活动ID (如 76145): ").strip()       # itemPriorityActId
+    amount = input("数量 (如 1): ").strip() or "1"
+
+    if not item_code or not act_id:
+        print("商品编码和活动ID不能为空")
+        exit(1)
+
+    print()
+    rush_result = None
+    for attempt in range(1, 100001):
+        print(f"--- 第 {attempt}/100000 次抢购 ---")
+        rush_result = client.rush_purchase(
+            item_code=item_code,
+            item_priority_act_id=act_id,
+            amount=amount,
         )
-        
-        if submit_result.get("code") != 2000:
-            print(f"\n下单失败: {submit_result}")
-            exit(0)
-        
-        order_id = str(submit_result.get("data", {}).get("orderId", ""))
-        print(f"\n[下单成功] orderId={order_id}")
-        
-    else:
-        # === 抢购模式（原有逻辑） ===
-        item_code = "IMTP1000006" #input("商品编码 (如 IMTP1000313): ").strip()
-        sku_id = "1000139" #input("规格ID (如 741): ").strip()
-        act_id = "82164" #input("活动ID (如 82107): ").strip()
-        amount = 1 #input("数量 (如 1): ").strip() or "1"
+        if isinstance(rush_result, dict) and rush_result.get("code") == 2000:
+            break
+        # 随机延迟，模拟真实操作，避免 429
+        delay = random.uniform(2.0, 4.0)
+        print(f"--- 等待 {delay:.2f} 秒后继续 ---")
+        time.sleep(delay)
 
-        if not item_code or not sku_id or not act_id:
-            print("商品编码、规格ID和活动ID均不能为空")
-            exit(1)
+    # 4. 组单 + 下单
+    if rush_result.get("code") != 2000:
+        print(f"\n抢购未成功: {rush_result}")
+        exit(0)
 
-        print()
-        rush_result = None
-        for attempt in range(1, 100001):
-            print(f"--- 第 {attempt}/100000 次抢购 ---")
-            rush_result = client.rush_purchase(
-                item_code=item_code,
-                sku_id=sku_id,
-                item_priority_act_id=act_id,
-                amount=amount,
-            )
-            if isinstance(rush_result, dict) and rush_result.get("code") == 2000:
-                break
-            # 随机延迟，模拟真实操作，避免 429
-            delay = random.uniform(2.0, 4.0)
-            print(f"--- 等待 {delay:.2f} 秒后继续 ---")
-            time.sleep(delay)
+    record_id = rush_result.get("data", {}).get("priorityRecordId", 0)
+    print(f"\n[抢购成功] priorityRecordId={record_id}")
 
-        # 4. 组单 + 下单
-        if rush_result.get("code") != 2000:
-            print(f"\n抢购未成功: {rush_result}")
-            exit(0)
+    if input("\n是否下单? (y/n): ").strip().lower() != "y":
+        exit(0)
 
-        record_id = rush_result.get("data", {}).get("priorityRecordId", 0)
-        print(f"\n[抢购成功] priorityRecordId={record_id}")
+    count = int(amount)
+    # compose_result = client.compose_order(
+    #     spu_id=item_code, count=count, priority_record_id=record_id, address=selected_addr,
+    # )
+    # if compose_result.get("code") != 2000:
+    #     print(f"\n组单失败: {compose_result}")
+    #     exit(0)
 
-        if input("\n是否下单? (y/n): ").strip().lower() != "y":
-            exit(0)
+    # 先定义地址变量（空地址示例，你 later 可以改成真实地址）
+    selected_addr = ""  # 这里是空字符串，不影响运行
 
-        count = int(amount)
-        # compose_result = client.compose_order(
-        #     spu_id=item_code, count=count, priority_record_id=record_id, address=selected_addr,
-        # )
-        # if compose_result.get("code") != 2000:
-        #     print(f"\n组单失败: {compose_result}")
-        #     exit(0)
+    submit_result = client.submit_order(
+        spu_id=item_code, count=count, priority_record_id=record_id, address=selected_addr,
+    )
+    if submit_result.get("code") != 2000:
+        print(f"\n下单失败: {submit_result}")
+        exit(0)
 
-        # 先定义地址变量（空地址示例，你 later 可以改成真实地址）
-        selected_addr = ""  # 这里是空字符串，不影响运行
-
-        submit_result = client.submit_order(
-            spu_id=item_code, count=count, priority_record_id=record_id, address=selected_addr,
-        )
-        if submit_result.get("code") != 2000:
-            print(f"\n下单失败: {submit_result}")
-            exit(0)
-
-        order_id = str(submit_result.get("data", {}).get("orderId", ""))
-        print(f"\n[下单成功] orderId={order_id}")
+    order_id = str(submit_result.get("data", {}).get("orderId", ""))
+    print(f"\n[下单成功] orderId={order_id}")
 
     if input("是否支付? (y/n): ").strip().lower() != "y" or not order_id:
         exit(0)

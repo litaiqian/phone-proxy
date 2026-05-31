@@ -5,6 +5,33 @@ git init
 git add phone_proxy_app .github
 git commit -m "init"
 git remote add origin https://github.com/litaiqian/phone-proxy.git
-
+git config --global user.name "litaiqian"
+git config --global user.email "litaiqian@sina.cn"
 
 git push -u origin main
+
+
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+git push -u origin main
+
+#强制推送：
+git push -f origin main
+
+
+============================================================
+# 1. 先删掉全局代理（关键）
+git config --global --unset http.proxy
+git config --global --unset https.proxy
+
+# 2. 再删掉当前仓库的代理（保险）
+git config --unset http.proxy
+git config --unset https.proxy
+
+# 3. 确认一下是否真的清掉了（应该什么都不返回）
+git config --global --get http.proxy
+git config --global --get https.proxy
+
+# 4. 重新 push
+git push -u origin main
+=======================================================

@@ -12,15 +12,12 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord
-from core.database import get_user_config, get_user_proxy
-from config import Config, BASEDIR
-from services.proxy_manager import proxy_manager
-from demo import MoutaiClient, _get, _load_accounts, _load_account_to_client, BASE_URL
-from demo import generate_h5_did, generate_h5_start_id, generate_bs_device_id
-
 router = APIRouter(tags=["杂项"])
+
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord, get_user_config, get_user_proxy, Config, BASEDIR  # noqa: E402
+from demo import MoutaiClient, _get, _load_accounts, _load_account_to_client, BASE_URL  # noqa: E402
+from demo import generate_h5_did, generate_h5_start_id, generate_bs_device_id  # noqa: E402
 
 
 def build_client_from_record(phone: str, db: Session) -> MoutaiClient:
@@ -89,7 +86,6 @@ async def refresh_login(user: User = Depends(get_current_user), db: Session = De
         accounts = _load_accounts(accounts_file)
     except Exception:
         accounts = []
-    ip_black_count = {}
 
     for i, phone in enumerate(phones):
         if i > 0:
@@ -108,30 +104,8 @@ async def refresh_login(user: User = Depends(get_current_user), db: Session = De
             else:
                 current_proxy = ''
                 if proxy_enabled:
-                    if record and record.proxy_ip and record.proxy_ip not in proxy_manager._discarded:
-                        current_proxy = record.proxy_ip
-                    else:
-                        current_proxy = proxy_manager.get_proxy(proxy_api_url)
-                        if record:
-                            record.proxy_ip = current_proxy
-                            db.commit()
-                else:
-                    # 代理已关闭，清理数据库残留的旧 IP
-                    if record and record.proxy_ip:
-                        record.proxy_ip = ''
-                        db.commit()
-                    if current_proxy and ip_black_count.get(current_proxy, 0) >= 3:
-                        proxy_manager.discard_proxy(current_proxy)
-                        black_with_ip = db.query(PhoneRecord).filter(
-                            PhoneRecord.proxy_ip == current_proxy,
-                            PhoneRecord.account_type == 'black').all()
-                        for bw in black_with_ip:
-                            db.delete(bw)
-                        db.commit()
-                        current_proxy = proxy_manager.get_proxy(proxy_api_url)
-                        if record:
-                            record.proxy_ip = current_proxy
-                            db.commit()
+                    from moutai_automation import _alloc_proxy_for_client
+                    current_proxy = await _alloc_proxy_for_client(proxy_api_url)
 
                 try:
                     client = MoutaiClient(bs_dvid=acc.get('bs-dvid', ''))
@@ -151,31 +125,6 @@ async def refresh_login(user: User = Depends(get_current_user), db: Session = De
                             record.user_id_ext = acc.get('userid', '')
                             record.last_updated = datetime.datetime.utcnow()
                             db.commit()
-                        if record and not record.account_type:
-                            try:
-                                client2 = MoutaiClient(bs_dvid=acc.get('bs-dvid', ''))
-                                client2.proxy = current_proxy
-                                _load_account_to_client(acc, client2)
-                                item_code = record.item_code or 'IMTP1000313'
-                                detail = client2.auto_fetch_item_details(item_code=item_code, spu_id=item_code)
-                                sku_id = detail.get('default_sku_id', '741')
-                                item_code_rush = detail.get('item_code_from_api', '1001017')
-                                act_id = detail.get('activity_id', '82107')
-                                rush_result = client2.rush_purchase(
-                                    item_code=item_code_rush, sku_id=sku_id,
-                                    item_priority_act_id=act_id, amount='1')
-                                r_code = rush_result.get('code')
-                                r_msg = rush_result.get('message', '')
-                                if '人数多' in r_msg or '库存不足' in r_msg or r_code in (4031, 4099):
-                                    record.account_type = 'black'
-                                    if current_proxy:
-                                        ip_black_count[current_proxy] = ip_black_count.get(current_proxy, 0) + 1
-                                elif '活动未开始' in r_msg or '未开始' in r_msg:
-                                    record.account_type = 'white'
-                                db.commit()
-                            except Exception as e:
-                                if proxy_enabled and current_proxy and 'Connect' in str(e):
-                                    proxy_manager.discard_proxy(current_proxy)
                     else:
                         status_desc = 'offline'
                         valid = False
@@ -190,12 +139,6 @@ async def refresh_login(user: User = Depends(get_current_user), db: Session = De
                         record.logged_in = False
                         record.last_updated = datetime.datetime.utcnow()
                         db.commit()
-                    if proxy_enabled and current_proxy:
-                        proxy_manager.discard_proxy(current_proxy)
-                        new_proxy = proxy_manager.get_proxy(proxy_api_url)
-                        if record:
-                            record.proxy_ip = new_proxy
-                            db.commit()
 
             sync_login_time_from_json(phone, db)
         except Exception as e:
@@ -205,7 +148,7 @@ async def refresh_login(user: User = Depends(get_current_user), db: Session = De
         results[phone] = {
             'valid': valid, 'status_desc': status_desc,
             'account_type': record.account_type if record else '',
-            'proxy_ip': record.proxy_ip if record else ''
+            'proxy_ip': current_proxy if 'current_proxy' in dir() else ''
         }
 
     return JSONResponse(content={'status': 'success', 'results': results})

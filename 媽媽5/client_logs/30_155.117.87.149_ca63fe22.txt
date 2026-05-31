@@ -1,0 +1,21 @@
+[14:00:35.582] [启动] 主机=PC-20260515XMDD | UUID=ca63fe22 | 日志目录=D:\采购管理\媽媽5\logs
+[14:00:43.099] [注册] 窗口=1, UUID=ca63fe22, 任务=2
+[14:00:44.686] [配置] 抢购时间(到达目标站): 14:01:59.000 | 频率: 500ms | 次数: 5/账号/轮 | 窗口: 13轮/每5分钟
+[14:00:47.488] [启动] 代理IP=开启(0个IP) | 频率500ms
+[14:00:47.489] [代理] ⚠️ 代理已开启但无可用IP，等待代理上线...
+[14:00:47.489] [任务] 13438424444 | proxy=
+[14:00:47.489] [任务] 18628877222 | proxy=
+[14:00:47.489] [心跳] 已启动，每10秒上报状态
+[14:00:47.699] [时间同步] 偏差=+0.000s (本地慢于服务器)
+[14:00:47.851] [CDN时钟] 校验异常: Failed to perform, curl: (56) Proxy CONNECT aborted. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[14:00:48.885] 📱 模拟浏览商品页面（距抢购69.8秒，目标=14:01:59.000）...
+[14:00:49.744] [参数] API调用异常(第1次): Failed to perform, curl: (56) Proxy CONNECT aborted. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[14:00:50.040] [参数] API调用异常(第2次): Failed to perform, curl: (56) Proxy CONNECT aborted. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[14:00:50.340] [参数] API调用异常(第3次): Failed to perform, curl: (56) Proxy CONNECT aborted. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+[14:00:50.340] [参数] ❌ 3次重试均失败，无法获取商品参数！
+[14:00:51.088] [参数] API获取成功 | skuId=741 | itemCode=1001017 | actId=85078
+[14:00:51.207] [参数] API返回数据不完整(第1次): sku_id=741, item_code=, act_id=
+[14:00:51.476] [参数] API获取成功 | skuId=741 | itemCode=1001017 | actId=85078
+[14:01:58.704] 🔥快抢 | 目标=14:01:59.000 | 13438424444=[直连] | 18628877222=[直连]
+[14:01:58.705] 抢购结果: 0/2成功 | 累计0 | 68.1s
+[14:01:58.705] [本地IP池] 仅剩0个，后台补充...

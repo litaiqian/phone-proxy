@@ -1,0 +1,20 @@
+=== 抢购开始 round=14250_1780122235705 time=14:25:00.003 ===
+[13594265417] 抢购参数 | itemCode=1001017 actId=85078 spuId=741 频率=500ms 次数=5
+[13438424444] 抢购参数 | itemCode=1001017 actId=85078 spuId=741 频率=500ms 次数=5
+[13594265417] 📋 POST https://h5.moutai519.com.cn/xhr/front/trade/priority/rushPurchase
+[13594265417] 📋 actParam: {"amount":"2","itemCode":"1001017","itemPriorityActId":"85078","userInfoBaseContext":{"addressLat":"","addressLng":"","appUserAgent":"android;14;Xiaomi;shennong","deviceId":"clips_exoiEnRDcRMnFCYXIht5GCsdfhorEioafh14","mtr":"clips_OlU6TmFRag5rCXwbNAQ\/Tz1SKlN8THcecBp\/HGhHdw=="},"ydLogId":"","ydToken":""}
+[13438424444] 📋 POST https://h5.moutai519.com.cn/xhr/front/trade/priority/rushPurchase
+[13438424444] 📋 actParam: {"amount":"2","itemCode":"1001017","itemPriorityActId":"85078","userInfoBaseContext":{"addressLat":"","addressLng":"","appUserAgent":"android;14;OnePlus;oph2201","deviceId":"clips_Kh4rSXBCdUB4TChJKEt\/THlOeEFwRCIQJEchGStJfg==","mtr":"clips_OlU6TmFRag5rCXwbNAQ\/Tz1SKlN8THcecBp\/HGhHdw=="},"ydLogId":"","ydToken":""}
+[13594265417] #1 HTTP=429 code=429 msg= 336ms
+[13438424444] #1 HTTP=429 code=429 msg= 321ms
+[13438424444] ⚡连续3次429 → 中轮切IP
+[13594265417] ⚡连续3次429 → 中轮切IP
+中轮切IP前: unknown
+中轮切IP前: unknown
+飞行模式切换: cmd connectivity (免Root)
+飞行模式切换: cmd connectivity (免Root)
+中轮切IP后: unknown ✗未变
+中轮切IP后: unknown ✗未变
+抢购完成 | 耗时=15036ms | 成功=0/2 | 429=是
+  13438424444: ❌ rush | 已达最大次数(5)
+  13594265417: ❌ rush | 已达最大次数(5)

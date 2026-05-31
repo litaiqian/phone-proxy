@@ -15,14 +15,13 @@ from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 import pandas as pd
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord
-from config import UPLOAD_FOLDER, BASEDIR, Config
-
-from demo import MoutaiClient, generate_h5_did, generate_h5_start_id, generate_bs_device_id
-from services.keepalive import save_account_to_json
-
 router = APIRouter(tags=["账号管理"])
+
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord, UPLOAD_FOLDER, BASEDIR, Config  # noqa: E402
+
+from demo import MoutaiClient, generate_h5_did, generate_h5_start_id, generate_bs_device_id  # noqa: E402
+from moutai_automation import save_account_to_json  # noqa: E402
 
 
 def build_client_from_record(phone: str, db: Session) -> MoutaiClient:
@@ -277,7 +276,7 @@ async def batch_send_code(request: Request, user: User = Depends(get_current_use
         return JSONResponse(content={'status': 'error', 'message': '无号码'}, status_code=400)
 
     def batch_task():
-        from core.database import SessionLocal as SL
+        from moutai_automation import SessionLocal as SL
         with SL() as db2:
             all_records = db2.query(PhoneRecord).filter(PhoneRecord.user_id == user_id).all()
             pending_phones = [rec.phone for rec in all_records if not rec.logged_in]
@@ -297,14 +296,8 @@ async def batch_send_code(request: Request, user: User = Depends(get_current_use
 @router.post("/api/clear_all_records")
 async def clear_all_records(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        from config import QRCODE_FOLDER as QF
-        records = db.query(PhoneRecord).filter(PhoneRecord.user_id == user.id).all()
-        for rec in records:
-            qrcode_path = os.path.join(QF, f"{rec.phone}.png")
-            if os.path.exists(qrcode_path):
-                os.remove(qrcode_path)
         db.query(PhoneRecord).filter(PhoneRecord.user_id == user.id).delete()
         db.commit()
-        return JSONResponse(content={'status': 'success', 'message': '已清空所有账号及二维码'})
+        return JSONResponse(content={'status': 'success', 'message': '已清空所有账号'})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

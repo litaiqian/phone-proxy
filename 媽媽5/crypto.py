@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-i-moutai 1.9.6 crypto - actParam + Content-Web-Bb 完整请求构建
+i-moutai 1.9.7 crypto - actParam + Content-Web-Bb 完整请求构建
 
 通过 IDA 逆向 librand.so 还原:
   - MIX (mixK): MT-V 签名生成
@@ -769,6 +769,11 @@ FIELD_INDEX = {
 # imaotai H5 默认 app_key
 DEFAULT_APP_KEY = "10001"
 
+# WASM 签名版本 (从浏览器 localStorage __wasm_sign_version__ 提取)
+# 瑞数CDN解密Content-Web-Bb时校验字段"140"(wasm_version)
+# 若为空则返回429; 此值随sign_wasm版本更新, 需定期从浏览器刷新
+WASM_VERSION = "38df6fbb539f079c4c82c64aaae89869"
+
 
 def generate_content_web_bb(
     request_data: str,
@@ -820,6 +825,9 @@ def generate_content_web_bb(
     sign = murmur_hash3_x64_128(request_data, seed=27, max_len=4096, salt=random_id)
 
     # Step 3: 自动 WASM 签名 (仅抢购请求 + 未手动传入时)
+    # wasm_version: 抢购请求自动填充全局 WASM_VERSION 常量
+    if is_rush_purchase and not wasm_version:
+        wasm_version = WASM_VERSION
     if is_rush_purchase and not wasm_sign:
         ws = generate_wasm_sign(did, sign, sign_wasm_bytes)
         if ws:
@@ -2014,34 +2022,35 @@ def build_rush_request(
     )
 
     headers = {
+        "Host": "h5.moutai519.com.cn",
+        "Connection": "keep-alive",
+        "x-csrf-token": "",
         "MT-V": mt_v,
-        "MT-K": mt_k,
-        "MT-Info": MT_INFO,
         "MT-Device-ID": mt_device,
-        "MT-APP-Version": app_version,
-        "MT-R": mt_r,
-        "MT-SN": mt_sn,
         "Content-Web-Bb": bb_headers["Content-Web-Bb"],
+        "MT-APP-Version": app_version,
         "Sdk-Ver-Bb": bb_headers["Sdk-Ver-Bb"],
-        "Content-Hh-Bb": bb_headers["Content-Hh-Bb"],
         "User-Agent": user_agent,
         "content-type": "application/json",
         "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Hh-Bb": bb_headers["Content-Hh-Bb"],
         "X-Requested-With": "XMLHttpRequest",
+        "MT-Info": MT_INFO,
+        "MT-K": mt_k,
         "Origin": "https://h5.moutai519.com.cn",
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
     cookies = {
         "MT-Token-Wap": cookie,
         "MT-Device-ID-Wap": device_id,
+        "_sdk_v_": SDK_VERSION,  # Cookie 顺序与真实浏览器一致
+        "_bs_device_id": generate_bs_device_id(h5_did),
         "_d_u": generate_d_u_cookie(h5_did, h5_start_id),
-        "_bs_device_id": generate_bs_device_id(h5_did),  # genFToken 生成的浏览器指纹 cookie
-        "_sdk_v_": SDK_VERSION,                           # SDK 版本 cookie
     }
 
     return headers, cookies, body
@@ -2104,34 +2113,35 @@ def build_reservation_request(
     )
 
     headers = {
+        "Host": "h5.moutai519.com.cn",
+        "Connection": "keep-alive",
+        "x-csrf-token": "",
         "MT-V": mt_v,
-        "MT-K": mt_k,
-        "MT-Info": MT_INFO,
         "MT-Device-ID": mt_device,
-        "MT-APP-Version": app_version,
-        "MT-R": mt_r,
-        "MT-SN": mt_sn,
         "Content-Web-Bb": bb_headers["Content-Web-Bb"],
+        "MT-APP-Version": app_version,
         "Sdk-Ver-Bb": bb_headers["Sdk-Ver-Bb"],
-        "Content-Hh-Bb": bb_headers["Content-Hh-Bb"],
         "User-Agent": user_agent,
         "content-type": "application/json",
         "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Hh-Bb": bb_headers["Content-Hh-Bb"],
         "X-Requested-With": "XMLHttpRequest",
+        "MT-Info": MT_INFO,
+        "MT-K": mt_k,
         "Origin": "https://h5.moutai519.com.cn",
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
     cookies = {
         "MT-Token-Wap": cookie,
         "MT-Device-ID-Wap": device_id,
-        "_d_u": generate_d_u_cookie(h5_did, h5_start_id),
+        "_sdk_v_": SDK_VERSION,  # Cookie 顺序与真实浏览器一致
         "_bs_device_id": generate_bs_device_id(h5_did),
-        "_sdk_v_": SDK_VERSION,
+        "_d_u": generate_d_u_cookie(h5_did, h5_start_id),
     }
 
     return headers, cookies, body
@@ -2143,7 +2153,7 @@ if __name__ == "__main__":
     # decrypt_content_web_bb 已在本模块中定义
 
     print("=" * 60)
-    print("i-moutai 1.9.6 actParam + Content-Web-Bb")
+    print("i-moutai 1.9.7 actParam + Content-Web-Bb")
     print("=" * 60)
 
     # 1. MT-V 签名算法自验证

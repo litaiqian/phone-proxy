@@ -10,16 +10,14 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
-from routes import get_db, get_current_user
-from models import User, PhoneRecord
-from core.database import SessionLocal
-from config import BASEDIR
-
 router = APIRouter(tags=["绑定账号"])
 
+from routes import get_db, get_current_user  # noqa: E402
+from moutai_automation import User, PhoneRecord, SessionLocal, BASEDIR  # noqa: E402
+
 # 从 demo.py 导入
-from demo import MoutaiClient
-from services.keepalive import save_account_to_json
+from demo import MoutaiClient  # noqa: E402
+from moutai_automation import save_account_to_json  # noqa: E402
 
 
 def build_client_from_record(phone: str, db: Session) -> MoutaiClient:

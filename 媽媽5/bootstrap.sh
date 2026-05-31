@@ -85,8 +85,6 @@ pkill -f "main.py" 2>/dev/null
 sleep 2
 
 # ==================== 4. 启动客户端窗口 ====================
-LOG_DIR="$INSTALL_DIR/logs"
-mkdir -p "$LOG_DIR"
 
 echo ">>> 启动 $WINDOWS 个客户端窗口..."
 for i in $(seq 1 $WINDOWS); do
@@ -94,7 +92,7 @@ for i in $(seq 1 $WINDOWS); do
         --user-id $USER_ID \
         --server "${SERVER_URL}" \
         --bridge "${BRIDGE_URL}" \
-        >> "$LOG_DIR/client_${i}.log" 2>&1 &
+        >> /dev/null 2>&1 &
     echo "窗口${i} PID: $!"
     sleep 0.5
 done
@@ -104,7 +102,6 @@ RUNNING=$(ps aux | grep "moutai_client_worker.py" | grep -v grep | wc -l)
 echo ""
 echo "==============================="
 echo " 启动完成！运行中: ${RUNNING} 个窗口"
-echo " 日志目录: $LOG_DIR/"
 echo "==============================="
 
 # ==================== 5. 设置开机自启 ====================
@@ -122,8 +119,6 @@ SERVER_URL="$SERVER_URL"
 BRIDGE_URL="$BRIDGE_URL"
 DOWNLOAD_URL="$DOWNLOAD_URL"
 INSTALL_DIR="$INSTALL_DIR"
-LOG_DIR="$INSTALL_DIR/logs"
-mkdir -p "\$LOG_DIR"
 
 # 下载最新
 if [ -n "\$DOWNLOAD_URL" ]; then
@@ -133,7 +128,7 @@ if [ -n "\$DOWNLOAD_URL" ]; then
     if [ -f moutai.tar.gz ]; then
         tar -xzf moutai.tar.gz -C "\$INSTALL_DIR" --strip-components=1 2>/dev/null
         rm -f moutai.tar.gz
-        echo "[\$(date)] 程序更新完成" >> "\$LOG_DIR/auto_start.log"
+        echo "[\$(date)] 程序更新完成" >> /dev/null
     fi
 fi
 
@@ -150,10 +145,10 @@ for i in \$(seq 1 \$WINDOWS); do
         --user-id \$USER_ID \\
         --server "\$SERVER_URL" \\
         --bridge "\$BRIDGE_URL" \\
-        >> "\$LOG_DIR/client_\${i}.log" 2>&1 &
+        >> /dev/null 2>&1 &
     sleep 0.5
 done
-echo "[\$(date)] 启动 \${WINDOWS} 个窗口" >> "\$LOG_DIR/auto_start.log"
+echo "[\$(date)] 启动 \${WINDOWS} 个窗口" >> /dev/null
 AUTOSTART_EOF
 
 chmod +x "$INSTALL_DIR/auto_start.sh"
@@ -167,6 +162,5 @@ echo ""
 echo "====================================="
 echo " 管理命令："
 echo " 查看状态: ps aux | grep moutai"
-echo " 查看日志: tail -f $LOG_DIR/client_1.log"
 echo " 停止全部: pkill -f moutai_client_worker"
 echo "====================================="
