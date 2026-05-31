@@ -27,7 +27,6 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker, Session as SQLSession
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
-import qrcode
 import asyncio
 import httpx
 
@@ -121,25 +120,36 @@ class BridgeClient:
 
 # ===================== 配置 =====================
 BASEDIR = os.path.abspath(os.path.dirname(__file__))
-QRCODE_FOLDER = os.path.join(BASEDIR, 'static', 'qrcodes')
 UPLOAD_FOLDER = os.path.join(BASEDIR, 'uploads')
 DATA_FOLDER = os.path.join(BASEDIR, 'data')
-os.makedirs(QRCODE_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATA_FOLDER, exist_ok=True)
 
-# 库存监控全局变量
-stock_monitoring_active = False
-is_stock_available = False
-active_monitors = {}
-INVENTORY_MONITORING_END_HOUR = 21
-INVENTORY_CHECK_INTERVAL = 60
-rush_job_started = False
+# ===================== 手机WS日志保存 =====================
+PHONE_WS_LOG_DIR = os.path.join(BASEDIR, 'client_logs')
+os.makedirs(PHONE_WS_LOG_DIR, exist_ok=True)
 
-# 库存广播系统
-inventory_broadcast_status: str = 'unknown'  # 'available' | 'soldout' | 'unknown'
-broadcast_clients: dict = {}  # client_id -> callback_url
-broadcast_tree_lock = asyncio.Lock()
+
+def _save_phone_ws_log(device_id: str, round_id: str, log_content: str, suffix: str = 'logs'):
+    """将手机WS上报的日志写入 client_logs/ 目录（与 HTTP /api/client/upload_log 一致）"""
+    if not log_content or not log_content.strip():
+        return
+    try:
+        day = datetime.datetime.now().strftime('%d')
+        safe_round = round_id.replace('/', '_').replace('\\', '_').replace(':', '_') if round_id else 'unknown'
+        safe_device = device_id[:20].replace('/', '_').replace('\\', '_') if device_id else 'unknown'
+        filename = f"{day}_{safe_device}_{safe_round}_{suffix}.txt"
+        filepath = os.path.join(PHONE_WS_LOG_DIR, filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(log_content)
+            if not log_content.endswith('\n'):
+                f.write('\n')
+            f.flush()
+            os.fsync(f.fileno())
+        print(f'[手机WS] 日志已保存: {filename} | {len(log_content)}字符')
+    except Exception as e:
+        print(f'[手机WS] 日志保存失败: {e}')
+
 
 # 客户端注册与心跳追踪系统
 active_client_windows: dict = {}  # {client_id: {"batch": int, "last_heartbeat": float, "ip": str, "hostname": str, "task_count": int}}
@@ -163,9 +173,9 @@ _pending_server_restart: dict = {}  # {"version": int, "trigger_time": float}
 
 # ===================== 代理模式 ====================
 # 代理模式：控制代理开关
-#   proxy_only = 使用外部代理（豌豆代理池）
+#   proxy_only = 使用外部代理
 #   off        = 完全不走代理
-PHONE_PROXY_MODE = os.environ.get('PHONE_PROXY_MODE', 'proxy_only')
+PHONE_PROXY_MODE = os.environ.get('PHONE_PROXY_MODE', 'off')
 
 # 黑号判断：兼容 'black' / '成功|黑号' 等格式
 def _is_black_account(account_type: str) -> bool:
@@ -209,11 +219,56 @@ class Config:
     DEFAULT_RUSH_HOUR = 8
     DEFAULT_RUSH_MINUTE = 58
     AUTO_MODE_DEFAULT = False
-    # 豌豆代理API配置
-    # 豌豆代理API地址由用户在网页配置（UserProxy.proxy_url）
+    BRIDGE_PORT = 5000
+    CLIENT_PORT = 5000
+    DEFAULT_RUSH_SECOND = 59
+    SLIDER_API_PORT = 8887
+    OCR_SERVER_PORT = 9898
+    # 代理API配置
+    # 代理API地址由用户在网页配置（UserProxy.proxy_url）
 
+# Config 类属性依赖的派生 URL（定义在类外部）
+Config.SLIDER_API_URL = f'http://127.0.0.1:{Config.SLIDER_API_PORT}'
+Config.OCR_SERVER_URL = f'http://127.0.0.1:{Config.OCR_SERVER_PORT}'
 
 _bridge = BridgeClient()  # 全局单例（必须在 Config 类之后）
+
+# ===================== 模块级常量 =====================
+STATIC_DIR = os.path.join(BASEDIR, 'templates')
+
+# ===================== 茅台 API 常量 =====================
+BASE_URL = "https://app.moutai519.com.cn"
+H5_BASE_URL = "https://h5.moutai519.com.cn"
+STATIC_URL = "https://static.moutai519.com.cn"
+RESOURCE_URL = "https://resource.moutai519.com.cn"
+PAYAPI_URL = "https://payapi.moutai519.com.cn"
+FE_URL = "https://fe.moutai519.com.cn"
+
+APP_VERSION = "1.9.7"
+SDK_VERSION = "3.4.0.202109291244"
+BUNDLE_ID = "com.moutai.mall"
+
+# ===================== 服务器 IP 白名单（从 HAR 提取）=====================
+WHITELIST_IPS = [
+    "175.43.199.112",
+    "123.6.84.25",
+    "123.6.84.248",
+    "123.6.85.83",
+    "180.76.199.131",
+    "122.195.144.16",
+    "101.69.146.238",
+    "27.222.17.238",
+    "119.188.72.61",
+    "123.155.252.136",
+    "123.155.252.138",
+    "163.177.18.227",
+    "221.204.66.38",
+    "220.197.32.185",
+    "220.197.32.187",
+    "180.130.99.140",
+    "203.209.250.8",
+    "203.209.243.27",
+]
 
 # ===================== iplala_accounts.json 导入函数 =====================
 def import_accounts_from_json(db: SQLSession = None, default_username: str = "admin"):
@@ -373,6 +428,7 @@ class User(Base):
     frozen_until = Column(DateTime, nullable=True)
     daily_failed = Column(Integer, default=0)
     last_failed_date = Column(DateTime, nullable=True)
+    api_token = Column(String(64), nullable=True, index=True)
 
 class PhoneRecord(Base):
     __tablename__ = 'phone_record'
@@ -411,8 +467,8 @@ class PhoneRecord(Base):
     uploader_name = Column(String(50), default='')
     task_role = Column(String(10), default='both')    # 任务角色: both=监控+抢购, monitor=仅监控, rush=仅抢购
     account_type = Column(String(10), default='')     # ''=未判断, white=白号, black=黑号
-    proxy_ip = Column(String(50), default='')          # 绑定的代理IP socks5://ip:port
     device_key = Column(String(50), default='')        # 绑定的设备机型key (如 xiaomi_13, samsung_s24_ultra)
+    proxy_ip = Column(String(45), default='')            # 代理IP地址
 
 # ===================== 新模型：用户级隔离表 =====================
 class UserConfig(Base):
@@ -429,7 +485,6 @@ class UserConfig(Base):
     rush_count = Column(Integer, default=100)
     multi_open_count = Column(Integer, default=1)
     multi_open_enabled = Column(Boolean, default=False)
-    inventory_monitoring = Column(Integer, default=0)
     min_delay = Column(Integer, default=10)
     max_delay = Column(Integer, default=20)
     rush_paused = Column(Integer, default=0)
@@ -454,6 +509,48 @@ class UserProxy(Base):
     anti_ban_429_delay = Column(Integer, default=3)
     anti_ban_bangcle_ttl = Column(Integer, default=300)
     anti_ban_account_cooldown = Column(Integer, default=200)
+
+
+# ===================== 辅助函数 =====================
+def get_user_config(user_id: int, db: SQLSession):
+    """获取用户专属配置（不存在则自动创建默认行）"""
+    import time as _time
+    try:
+        db.execute(text('SET SESSION lock_wait_timeout = 1'))
+        db.execute(text('SET SESSION innodb_lock_wait_timeout = 1'))
+    except:
+        pass
+    max_retries = 10
+    for attempt in range(max_retries):
+        try:
+            cfg = db.query(UserConfig).filter(UserConfig.user_id == user_id).first()
+            if not cfg:
+                cfg = UserConfig(user_id=user_id)
+                db.add(cfg)
+                db.commit()
+            return cfg
+        except OperationalError as e:
+            if '1205' in str(e) and attempt < max_retries - 1:
+                db.rollback()
+                _time.sleep(0.1)
+            else:
+                db.rollback()
+                return UserConfig(user_id=user_id)
+    return UserConfig(user_id=user_id)
+
+
+def get_user_proxy(user_id: int, db: SQLSession):
+    """获取用户专属代理配置（不存在则自动创建）"""
+    try:
+        up = db.query(UserProxy).filter(UserProxy.user_id == user_id).first()
+        if not up:
+            up = UserProxy(user_id=user_id)
+            db.add(up)
+            db.commit()
+        return up
+    except:
+        return UserProxy(user_id=user_id)
+
 
 class TaskAssignment(Base):
     """任务分配记录（持久化）"""
@@ -488,6 +585,24 @@ class TeamAccount(Base):
     phone = Column(String(20), nullable=False, index=True)
     owner_user_id = Column(Integer, nullable=False, index=True)
     assigned_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class TeamMember(Base):
+    """团队成员表：owner 添加其他用户为成员，成员可在 App 团队页看到该团队账号"""
+    __tablename__ = 'team_member'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    added_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class AccountShare(Base):
+    """账号共享表：上传者授权其他用户管理其账号
+    共享后，被授权者在App团队列表可见授权者的账号，可用于抢购
+    但只有上传者才能删除账号"""
+    __tablename__ = 'account_share'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, nullable=False, index=True)
+    shared_to_user_id = Column(Integer, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 # ===================== 设备与窗口密钥注册模型 =====================
 class DeviceKey(Base):
@@ -532,6 +647,33 @@ class KeySeed(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
+# ===================== 保留旧的 GlobalConfig 用于兼容（迁移后废弃）=====================
+class GlobalConfig(Base):
+    """已废弃：迁移到 UserConfig + UserProxy。保留定义以兼容旧表。"""
+    __tablename__ = 'global_config'
+    id = Column(Integer, primary_key=True)
+    rush_hour = Column(Integer, default=8)
+    rush_minute = Column(Integer, default=58)
+    rush_second = Column(Integer, default=0)
+    default_item_code = Column(String(20), default='741')
+    default_act_id = Column(String(20), default='76145')
+    multi_open_count = Column(Integer, default=1)
+    multi_open_enabled = Column(Boolean, default=False)
+    task_frequency = Column(Integer, default=1)
+    rush_attempts = Column(Integer, default=10000)
+    rush_count = Column(Integer, default=100)
+    min_delay = Column(Integer, default=10)
+    max_delay = Column(Integer, default=20)
+    anti_ban_429_retry = Column(Integer, default=5)
+    anti_ban_429_delay = Column(Integer, default=3)
+    anti_ban_bangcle_ttl = Column(Integer, default=300)
+    anti_ban_account_cooldown = Column(Integer, default=200)
+    anti_ban_proxy_enabled = Column(Boolean, default=False)
+    anti_ban_proxy_url = Column(String(300), default='')
+    rush_paused = Column(Integer, default=0)
+    phone_multi_open_count = Column(Integer, default=3)
+
+
 # ===================== FastAPI 应用初始化 =====================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -567,10 +709,10 @@ async def lifespan(app: FastAPI):
                 ('uploader_name', 'ALTER TABLE phone_record ADD COLUMN uploader_name VARCHAR(50) DEFAULT ""'),
                 ('task_role', 'ALTER TABLE phone_record ADD COLUMN task_role VARCHAR(10) DEFAULT "both"'),
                 ('account_type', 'ALTER TABLE phone_record ADD COLUMN account_type VARCHAR(10) DEFAULT ""'),
-                ('proxy_ip', 'ALTER TABLE phone_record ADD COLUMN proxy_ip VARCHAR(50) DEFAULT ""'),
+                ('device_key', 'ALTER TABLE phone_record ADD COLUMN device_key VARCHAR(50) DEFAULT ""'),
+                ('proxy_ip', 'ALTER TABLE phone_record ADD COLUMN proxy_ip VARCHAR(45) DEFAULT ""'),
                 ('pay_url_wechat', 'ALTER TABLE phone_record ADD COLUMN pay_url_wechat VARCHAR(500) DEFAULT ""'),
                 ('pay_url_alipay', 'ALTER TABLE phone_record ADD COLUMN pay_url_alipay VARCHAR(500) DEFAULT ""'),
-                ('device_key', 'ALTER TABLE phone_record ADD COLUMN device_key VARCHAR(50) DEFAULT ""'),
             ]
             for col_name, alter_sql in phone_migrations:
                 if col_name not in pr_columns:
@@ -587,6 +729,7 @@ async def lifespan(app: FastAPI):
         user_columns = [col['name'] for col in inspector.get_columns('user')]
         with engine.connect() as conn:
             user_migrations = [
+                ('api_token', 'ALTER TABLE user ADD COLUMN api_token VARCHAR(64)'),
                 ('phone', 'ALTER TABLE user ADD COLUMN phone VARCHAR(20) UNIQUE'),
                 ('failed_logins', 'ALTER TABLE user ADD COLUMN failed_logins INTEGER DEFAULT 0'),
                 ('frozen_until', 'ALTER TABLE user ADD COLUMN frozen_until DATETIME'),
@@ -731,26 +874,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="猫妈妈自动化系统-FastAPI", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=Config.SECRET_KEY, session_cookie="moutai_session")
 
-# 注册养猫 App API 路由（/api/app/*）
-from routes.api_app import router as api_app_router
-app.include_router(api_app_router)
-
-# 团队管理 API — 使用 routes/api_teams.py 中的新版路由（基于用户ID，无需登录账号密码）
-from routes.api_teams import router as api_teams_router
-app.include_router(api_teams_router)
-
-# 注册桥接 API 路由（/api/bridge/*）— 同一进程内 HTTP 桥接，端口 5000
-from routes.api_bridge import router as api_bridge_router
-app.include_router(api_bridge_router)
-
-# 注册客户端 API 路由（/api/client/* /api/phone/*）— 手机心跳/任务分配
-from routes.api_client import router as api_client_router
-app.include_router(api_client_router)
-
 TEMPLATES_DIR = os.path.join(BASEDIR, "templates")
 if not os.path.exists(TEMPLATES_DIR):
     os.makedirs(TEMPLATES_DIR)
-app.mount("/static", StaticFiles(directory=os.path.join(BASEDIR, "static")), name="static")
+app.mount("/static", StaticFiles(directory=os.path.join(BASEDIR, "templates")), name="static")
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 jinja_env = Environment(
     loader=FileSystemLoader(TEMPLATES_DIR),
@@ -780,81 +907,36 @@ def logout_user_fastapi(request: Request):
     request.session["user_id"] = None
     request.session["username"] = None
 
-# ===================== 辅助函数 =====================
-def get_user_config(user_id: int, db: SQLSession):
-    """获取用户专属配置（不存在则自动创建默认行）"""
-    import time as _time
-    try:
-        db.execute(text('SET SESSION lock_wait_timeout = 1'))
-        db.execute(text('SET SESSION innodb_lock_wait_timeout = 1'))
-    except:
-        pass
-    max_retries = 10
-    for attempt in range(max_retries):
-        try:
-            cfg = db.query(UserConfig).filter(UserConfig.user_id == user_id).first()
-            if not cfg:
-                cfg = UserConfig(user_id=user_id)
-                db.add(cfg)
-                db.commit()
-            return cfg
-        except OperationalError as e:
-            if '1205' in str(e) and attempt < max_retries - 1:
-                db.rollback()
-                _time.sleep(0.1)
-            else:
-                db.rollback()
-                return UserConfig(user_id=user_id)
-    return UserConfig(user_id=user_id)
-
-
-def get_user_proxy(user_id: int, db: SQLSession):
-    """获取用户专属代理配置（不存在则自动创建）"""
-    try:
-        up = db.query(UserProxy).filter(UserProxy.user_id == user_id).first()
-        if not up:
-            up = UserProxy(user_id=user_id)
-            db.add(up)
-            db.commit()
-        return up
-    except:
-        return UserProxy(user_id=user_id)
-
-
-    # 已删除 get_global_config，统一使用 get_user_config(1, db)
 # ===================== 代理池管理器 =====================
 import threading as _threading
 import requests as _requests
 import urllib3; urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class ProxyManager:
-    """豌豆代理池管理：获取、分配、回收、丢弃代理IP
-    维护两个IP池：
-    - _pool: 原始未测试IP池（从豌豆API获取后直接放入）
-    - _ready_pool: 就绪池（已通过桥接测试确认可用的IP，直接下发无需再验证）
-    """
+    """代理IP获取：从代理服务商API直接拉取IP，不缓存不存储"""
     def __init__(self):
-        self._pool = []           # 原始未测试IP池
-        self._ready_pool = []     # 就绪池：已测试确认可用的IP
-        self._discarded = set()
         self._lock = _threading.Lock()
         self._last_fetch_time = 0
-        self._fetch_interval = 60
-        self._ready_pool_min = 10  # 就绪池最低阈值（少于10个自动补充）
+        self._fetch_interval = 5  # 最小获取间隔5秒（防刷）
 
     def fetch_proxies(self, api_url: str, count: int = 20) -> list:
-        """从豌豆API获取代理IP，api_url 为用户配置的完整API地址"""
+        """从API获取代理IP，返回 socks5://ip:port 列表（不缓存）"""
         if not api_url:
             print('[代理池] 未配置代理API地址')
             return []
+        # 清理URL首尾空白和尾部换行垃圾（不触动参数值中的 \n \r \t 等转义字符，
+        # 这些是 wandouapp 等代理API的合法参数，由 requests 自动URL编码处理）
+        api_url = api_url.strip().rstrip('&')
         now = time.time()
         with self._lock:
-            if now - self._last_fetch_time < self._fetch_interval and self._pool:
-                return self._pool
+            if now - self._last_fetch_time < self._fetch_interval:
+                # 间隔太短，等待
+                pass
             self._last_fetch_time = now
         try:
-            # 用户填的是完整URL，如果URL中已有num参数则不重复追加
             import urllib.parse
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             parsed = urllib.parse.urlparse(api_url)
             query_params = urllib.parse.parse_qs(parsed.query)
             if 'num' in query_params:
@@ -862,96 +944,56 @@ class ProxyManager:
             else:
                 sep = '&' if '?' in api_url else '?'
                 url = f"{api_url}{sep}num={count}"
+            # 打印请求URL（隐藏app_key）
+            display_url = url
+            try:
+                for key in ['app_key', 'key', 'token', 'api_key']:
+                    display_url = re.sub(f'({key}=)[^&]*', r'\1***', display_url)
+            except:
+                pass
+            print(f'[代理池] 请求API: {display_url[:120]}...')
             resp = _requests.get(url, timeout=10, verify=False)
+            print(f'[代理池] API响应: HTTP {resp.status_code} | 长度={len(resp.text)} | 内容={resp.text[:300]}')
             data = resp.json()
             if data.get('code') == 200 and data.get('data'):
-                new_proxies = []
+                proxies = []
                 for item in data['data']:
                     ip = item.get('ip', '')
                     port = item.get('port', '')
                     if ip and port:
-                        proxy = f"socks5://{ip}:{port}"
-                        if proxy not in self._discarded:
-                            new_proxies.append(proxy)
-                with self._lock:
-                    self._pool.extend(new_proxies)
-                    self._pool = list(dict.fromkeys(self._pool))
-                print(f'[代理池] 获取到 {len(new_proxies)} 个新代理 | 当前池大小: {len(self._pool)}')
-                return new_proxies
+                        proxies.append(f"socks5://{ip}:{port}")
+                print(f'[代理池] 获取到 {len(proxies)} 个IP')
+                return proxies
             else:
                 msg = data.get('msg', '未知错误')
-                if 'LACK' in str(msg).upper() or 'POOL' in str(msg).upper():
-                    print(f"[代理池] 暂无可用IP({msg})，30秒后重试")
-                    with self._lock:
-                        self._last_fetch_time = now - self._fetch_interval + 30
-                else:
-                    print(f'[代理池] API返回异常 | 错误: {msg}')
+                self._last_error = msg
+                print(f'[代理池] API返回异常 | code={data.get("code")} | msg={msg} | data_keys={list(data.keys())}')
                 return []
         except Exception as e:
-            print(f"[代理池] 获取代理失败: {e}")
+            print(f"[代理池] 获取代理失败: {type(e).__name__}: {e}")
             return []
 
-    def get_proxy(self, api_url: str = '') -> str:
-        with self._lock:
-            if self._pool:
-                return self._pool.pop(0)
-        self.fetch_proxies(api_url, 20)
-        with self._lock:
-            if self._pool:
-                return self._pool.pop(0)
-        return ''
-
-    def return_proxy(self, proxy: str):
-        if proxy and proxy not in self._discarded:
-            with self._lock:
-                self._pool.append(proxy)
-
-    def discard_proxy(self, proxy: str):
-        if proxy:
-            with self._lock:
-                self._discarded.add(proxy)
-                self._pool = [p for p in self._pool if p != proxy]
-
-    def pool_size(self) -> int:
-        with self._lock:
-            return len(self._pool)
-
-    def all_discarded(self) -> set:
-        """返回所有已丢弃的IP"""
-        with self._lock:
-            return set(self._discarded)
-
-    def get_ready_proxy(self) -> str:
-        """从就绪池取出一个已测试IP（无需再验证，立即返回）"""
-        with self._lock:
-            if self._ready_pool:
-                ip = self._ready_pool.pop(0)
-                self._pool = [p for p in self._pool if p != ip]
-                return ip
-        return ''
-
-    def add_ready_proxy(self, proxy: str):
-        """将已测试通过的IP加入就绪池"""
-        if proxy and proxy not in self._discarded:
-            with self._lock:
-                if proxy not in self._ready_pool:
-                    self._ready_pool.append(proxy)
-
-    def ready_pool_size(self) -> int:
-        with self._lock:
-            return len(self._ready_pool)
-
-    def ready_pool_need_refill(self) -> bool:
-        """检查是否需要补充就绪池"""
-        with self._lock:
-            return len(self._ready_pool) < self._ready_pool_min
-
-    def total_pool_size(self) -> int:
-        """返回所有可用IP总数（原始池+就绪池）"""
-        with self._lock:
-            return len(self._pool) + len(self._ready_pool)
-
 proxy_manager = ProxyManager()
+
+
+async def _fetch_and_test_proxies(api_url: str, count: int = 20, max_test: int = 10) -> list:
+    """从代理服务商拉取IP并测试可用性，返回可用的 socks5:// 列表"""
+    raw = proxy_manager.fetch_proxies(api_url, count)
+    if not raw:
+        print(f'[代理测试] 代理API返回空列表，无法继续')
+        return []
+    print(f'[代理测试] 代理API返回 {len(raw)} 个IP，测试前 {min(len(raw), max_test)} 个...')
+    available = []
+    test_count = min(len(raw), max_test)
+    for ip in raw[:test_count]:
+        result = await _test_proxy_ip(ip, timeout=5.0)
+        if result.get('ok'):
+            available.append(ip)
+            print(f'[代理测试] ✓ {ip}')
+        else:
+            print(f'[代理测试] ✗ {ip}: {result.get("reason", "unknown")}')
+    print(f'[代理测试] 完成: {len(available)}/{test_count} 可用')
+    return available
 
 def build_credentials_from_db(phone: str, db: SQLSession) -> dict:
     """
@@ -1050,6 +1092,18 @@ def save_account_to_json_from_creds(phone: str, credentials: dict, uploader_name
     with open(accounts_file, 'w', encoding='utf-8') as f:
         json.dump(accounts, f, ensure_ascii=False, indent=2)
 
+def _apply_login_result(record, login_result: dict, db: SQLSession, phone: str):
+    """将桥接登录结果写入 PhoneRecord 并保存到 JSON"""
+    record.token = login_result.get('token', '')
+    record.cookie = login_result.get('cookie', '')
+    record.user_id_ext = login_result.get('user_id_ext', '')
+    record.logged_in = True
+    record.last_updated = datetime.datetime.utcnow()
+    record.login_time = datetime.datetime.now()
+    db.commit()
+    save_account_to_json_from_creds(phone, login_result, record.uploader_name or "admin")
+
+
 def sync_login_time_from_json(phone, db: SQLSession):
     """从数据库中读取 uploader_name，再定位对应的 {uploader}_accounts.json"""
     record = db.query(PhoneRecord).filter(PhoneRecord.phone == phone).first()
@@ -1106,6 +1160,55 @@ def _get_login_status_desc(phone: str, valid: bool, db: SQLSession) -> str:
         pass
     return 'never'
 
+
+async def _detect_account_type(phone: str, db: SQLSession, proxy_url: str = '') -> str:
+    """
+    通过一次 rush_purchase 检测白号/黑号，更新 record.account_type 并 commit。
+    返回 account_type 字符串 ('white', 'black', 或 '').
+    """
+    record = db.query(PhoneRecord).filter(PhoneRecord.phone == phone).first()
+    if not record:
+        return ''
+    try:
+        creds = build_credentials_from_db(phone, db)
+        item_code = record.item_code or 'IMTP1000313'
+        detail_result = await _bridge._post('/api/bridge/execute', {
+            'method': 'auto_fetch_item_details',
+            'params': {'item_code': item_code, 'spu_id': item_code},
+            'credentials': creds,
+            'proxy_url': proxy_url
+        })
+        if detail_result.get('success'):
+            d = detail_result.get('result', {})
+            sku_id = d.get('default_sku_id', '741')
+            item_code_rush = d.get('item_code_from_api', '1001017')
+            act_id = d.get('activity_id', '82107')
+        else:
+            sku_id = '741'
+            item_code_rush = '1001017'
+            act_id = '82107'
+        rush_result = await _bridge._post('/api/bridge/execute', {
+            'method': 'rush_purchase',
+            'params': {'item_code': item_code_rush, 'sku_id': sku_id, 'item_priority_act_id': act_id, 'amount': '1'},
+            'credentials': creds,
+            'proxy_url': proxy_url
+        })
+        if rush_result.get('success'):
+            rush_data = rush_result.get('result', {})
+            r_code = rush_data.get('code')
+            r_msg = rush_data.get('message', '')
+            if r_code == 2000:
+                pass
+            elif r_code in (4031, 4099) or '请求人数过多' in r_msg or '库存不足' in r_msg:
+                record.account_type = 'black'
+            elif r_code in (4293,) or '人数较多' in r_msg or '活动未开始' in r_msg or '未开始' in r_msg:
+                record.account_type = 'white'
+            db.commit()
+            return record.account_type
+    except Exception as e:
+        print(f'[账号检测] {phone} 检测失败: {e}')
+    return record.account_type or ''
+
 # ===================== 代理IP自动测试与净化 =====================
 
 async def _test_proxy_ip(proxy_url: str, timeout: float = 8.0) -> dict:
@@ -1118,233 +1221,49 @@ async def _test_proxy_ip(proxy_url: str, timeout: float = 8.0) -> dict:
     return result if isinstance(result, dict) else {'ok': False, 'reason': '桥接异常'}
 
 
-async def _test_and_assign_ip(uploader_id: int, proxy_api_url: str, db: SQLSession,
-                               max_retries: int = 5) -> str:
+async def _alloc_proxy_for_client(api_url: str, max_retries: int = 5) -> str:
     """
-    分配可用代理IP。优先从就绪池直取（已测试，无需再验证）。
-    就绪池空时回退到现场测试逻辑。返回 socks5://... 或空字符串。
+    从代理服务商直接拉取并测试代理IP，返回一个可用的 socks5://... 或空字符串。
+    不存入数据库，每次调用都是全新获取。
     """
-    # 优先从就绪池取已测试IP（无需再验证，立即返回）
-    ready_ip = proxy_manager.get_ready_proxy()
-    if ready_ip:
-        print(f'[IP分配] ⚡就绪池直取: {ready_ip} | 就绪池剩余: {proxy_manager.ready_pool_size()}')
-        return ready_ip
-
-    # 就绪池为空，回退到现场取IP+测试逻辑
+    if not api_url:
+        return ''
     for attempt in range(max_retries):
-        proxy_ip = proxy_manager.get_proxy(proxy_api_url)
-        if not proxy_ip:
-            proxy_manager.fetch_proxies(proxy_api_url, 20)
-            proxy_ip = proxy_manager.get_proxy(proxy_api_url)
-        if not proxy_ip:
-            print(f'[IP分配] 代理池已空，无法分配IP')
-            return ''
-        test = await _test_proxy_ip(proxy_ip, timeout=6.0)
-        if test.get('ok'):
-            print(f'[IP分配] ✓ IP可用(现场测试): {proxy_ip}')
-            return proxy_ip
-        print(f'[IP分配] ✗ IP不可用: {proxy_ip}，丢弃重试({attempt+1}/{max_retries})')
-        proxy_manager.discard_proxy(proxy_ip)
+        raw = proxy_manager.fetch_proxies(api_url, 20)
+        for ip in raw:
+            test = await _test_proxy_ip(ip, timeout=6.0)
+            if test.get('ok'):
+                print(f'[IP分配] ✓ IP可用: {ip}')
+                return ip
+            print(f'[IP分配] ✗ IP不可用: {ip}，跳过')
+        if attempt < max_retries - 1:
+            await asyncio.sleep(1)
     return ''
 
 
-async def _purge_all_dead_ips(db: SQLSession = None):
-    """后台任务：遍历数据库中所有代理IP，逐个测试并淘汰不可用IP"""
-    print('[代理净化] 开始扫描所有代理IP...')
-    if db is None:
-        db = SessionLocal()
-        own_db = True
-    else:
-        own_db = False
-    try:
-        records = db.query(PhoneRecord).filter(
-            PhoneRecord.proxy_ip != '',
-            PhoneRecord.logged_in == True
-        ).all()
-        # 按IP去重（多个账号可能共用同一IP）
-        seen_ips = set()
-        dead_ips = set()
-        alive_ips = set()
-        for r in records:
-            ip = r.proxy_ip
-            if not ip or ip in seen_ips:
-                continue
-            seen_ips.add(ip)
-            test = await _test_proxy_ip(ip, timeout=5.0)
-            if test.get('ok'):
-                alive_ips.add(ip)
-            else:
-                dead_ips.add(ip)
-                print(f'[代理净化] 淘汰: {ip} ({test.get("reason")})')
-            await asyncio.sleep(0.5)  # 请求间短暂间隔
-        # 清理死IP：从数据库和代理池中移除
-        if dead_ips:
-            for ip in dead_ips:
-                proxy_manager.discard_proxy(ip)
-                # 清除对应记录的 proxy_ip
-                db.query(PhoneRecord).filter(PhoneRecord.proxy_ip == ip).update(
-                    {'proxy_ip': ''}, synchronize_session=False)
-            db.commit()
-            print(f'[代理净化] 完成: 淘汰{len(dead_ips)}个, 存活{len(alive_ips)}个, 总扫描{len(seen_ips)}个')
-        else:
-            print(f'[代理净化] 完成: 全部{len(seen_ips)}个IP正常')
-    except Exception as e:
-        print(f'[代理净化] 异常: {e}')
-        if own_db:
-            try:
-                db.rollback()
-            except:
-                pass
-    finally:
-        if own_db:
-            db.close()
-
-
-async def _proxy_purge_scheduler():
-    """代理净化后台调度器：每30分钟自动执行一次（代理关闭时跳过）"""
-    await asyncio.sleep(120)  # 启动2分钟后首次执行
-    while True:
-        try:
-            with SessionLocal() as db:
-                up = get_user_proxy(1, db)
-                if up and up.proxy_enabled:
-                    await _purge_all_dead_ips()
-        except Exception as e:
-            print(f'[代理净化调度] 异常: {e}')
-        await asyncio.sleep(1800)  # 每30分钟一次
-
-
-async def _account_pre_detect_scheduler():
-    """账号类型预检测调度器：每10分钟扫描未判定账号，自动测试判定白号/黑号"""
-    await asyncio.sleep(60)  # 启动1分钟后首次执行
-    while True:
-        try:
-            with SessionLocal() as db:
-                # 扫描已登录但未判定类型的账号
-                undetected = db.query(PhoneRecord).filter(
-                    PhoneRecord.logged_in == True,
-                    (PhoneRecord.account_type == '') | (PhoneRecord.account_type == None)
-                ).limit(50).all()  # 每次最多处理50个
-                if undetected:
-                    print(f'[账号预检] 发现 {len(undetected)} 个未判定账号，开始检测...')
-                    detected = 0
-                    for rec in undetected:
-                        try:
-                            creds = build_credentials_from_db(rec.phone, db)
-                            item_code = rec.item_code or 'IMTP1000313'
-                            # 先获取商品详情
-                            detail_result = await _bridge._post('/api/bridge/execute', {
-                                'method': 'auto_fetch_item_details',
-                                'params': {'item_code': item_code, 'spu_id': item_code},
-                                'credentials': creds,
-                                'proxy_url': rec.proxy_ip or ''
-                            })
-                            if detail_result.get('success'):
-                                d = detail_result.get('result', {})
-                                sku_id = d.get('default_sku_id', '741')
-                                item_code_rush = d.get('item_code_from_api', '1001017')
-                                act_id = d.get('activity_id', '82107')
-                            else:
-                                sku_id = '741'; item_code_rush = '1001017'; act_id = '82107'
-                            # 测试下单判定黑白
-                            rush_result = await _bridge._post('/api/bridge/execute', {
-                                'method': 'rush_purchase',
-                                'params': {'item_code': item_code_rush, 'sku_id': sku_id, 'item_priority_act_id': act_id, 'amount': '1'},
-                                'credentials': creds,
-                                'proxy_url': rec.proxy_ip or ''
-                            })
-                            if rush_result.get('success'):
-                                rush_data = rush_result.get('result', {})
-                                r_code = rush_data.get('code')
-                                r_msg = rush_data.get('message', '')
-                                if r_code in (4031, 4099) or '请求人数过多' in r_msg or '库存不足' in r_msg:
-                                    rec.account_type = 'black'
-                                    print(f'[账号预检] {rec.phone} → 黑号')
-                                    detected += 1
-                                elif r_code in (4293,) or '人数较多' in r_msg or '活动未开始' in r_msg or '未开始' in r_msg:
-                                    rec.account_type = 'white'
-                                    print(f'[账号预检] {rec.phone} → 白号')
-                                    detected += 1
-                            await asyncio.sleep(0.3)  # 请求间隔
-                        except Exception as e:
-                            print(f'[账号预检] {rec.phone} 检测异常: {e}')
-                            await asyncio.sleep(0.5)
-                    if detected > 0:
-                        db.commit()
-                        print(f'[账号预检] 本轮完成: 判定 {detected}/{len(undetected)} 个')
-                else:
-                    print(f'[账号预检] 无待判定账号')
-        except Exception as e:
-            print(f'[账号预检] 调度异常: {e}')
-        await asyncio.sleep(600)  # 每10分钟一次
-
-
-async def _ready_pool_refill(proxy_api_url: str):
-    """
-    就绪池补充：从原始池取未测试IP，通过桥接测试后移入就绪池。
-    当原始池有IP时自动测试补充；原始池=0时输出无可用IP日志。
-    """
-    raw_count = proxy_manager.pool_size()
-    if raw_count == 0:
-        # 原始池为空，尝试从API拉取
-        if proxy_api_url:
-            proxy_manager.fetch_proxies(proxy_api_url, 20)
-            raw_count = proxy_manager.pool_size()
-        if raw_count == 0:
-            print(f'[就绪池] 原始池和API均无可用IP！总池=0，无法补充')
-            return 0
-
-    ready_before = proxy_manager.ready_pool_size()
-    need = max(0, proxy_manager._ready_pool_min - ready_before)
-    # 每次最多测试 need+5 个（留余量）
-    max_test = min(need + 5, raw_count)
-
-    refilled = 0
-    for i in range(max_test):
-        raw_ip = proxy_manager.get_proxy(proxy_api_url)
-        if not raw_ip:
-            break
-        test = await _test_proxy_ip(raw_ip, timeout=6.0)
-        if test.get('ok'):
-            proxy_manager.add_ready_proxy(raw_ip)
-            refilled += 1
-        else:
-            proxy_manager.discard_proxy(raw_ip)
-        await asyncio.sleep(0.3)
-
-    ready_after = proxy_manager.ready_pool_size()
-    if refilled > 0:
-        print(f'[就绪池] 补充 {refilled} 个IP | 就绪池: {ready_before}→{ready_after} | 原始池剩余: {proxy_manager.pool_size()}')
-    else:
-        print(f'[就绪池] 本轮测试{max_test}个均不可用 | 就绪池: {ready_after} | 原始池: {proxy_manager.pool_size()}')
-    return refilled
-
-
-async def _ready_pool_refill_scheduler():
-    """
-    就绪池补充调度器：保持就绪池 >= 10 个已测试IP。
-    每30秒检查一次，就绪池不足时自动补充。
-    """
-    await asyncio.sleep(25)  # 启动25秒后首次执行（让其他服务先初始化）
-    while True:
-        try:
-            with SessionLocal() as db:
-                up = get_user_proxy(1, db)  # admin用户代理配置
-                proxy_enabled = up.proxy_enabled if up else False
-                proxy_api_url = up.proxy_url if up else ''
-            if not proxy_enabled:
-                pass  # 代理关闭，跳过所有就绪池操作
-            elif proxy_manager.ready_pool_need_refill():
-                if proxy_api_url:
-                    raw = proxy_manager.pool_size()
-                    ready = proxy_manager.ready_pool_size()
-                    print(f'[就绪池调度] 触发补充 | 就绪池: {ready} | 原始池: {raw}')
-                    await _ready_pool_refill(proxy_api_url)
-                else:
-                    print(f'[就绪池调度] 未配置代理API，跳过补充')
-        except Exception as e:
-            print(f'[就绪池调度] 异常: {e}')
-        await asyncio.sleep(30)  # 每30秒检查一次
+@app.post("/api/client/get_proxies")
+async def client_get_proxies(request: Request, db: SQLSession = Depends(get_db)):
+    """客户端获取代理IP：从代理服务商直接拉取并测试，返回可用IP列表"""
+    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
+        raise HTTPException(status_code=403)
+    data = await request.json()
+    uploader_id = data.get('uploader_id', 1)
+    count = data.get('count', 20)
+    up = get_user_proxy(uploader_id, db)
+    if not up or not up.proxy_enabled:
+        return JSONResponse(content={'status': 'error', 'message': '代理未开启'})
+    api_url = up.proxy_url or ''
+    if not api_url:
+        return JSONResponse(content={'status': 'error', 'message': '未配置代理API'})
+    proxies = await _fetch_and_test_proxies(api_url, count)
+    # 如果获取为0，附带代理服务商返回的错误信息
+    error_msg = getattr(proxy_manager, '_last_error', '')
+    return JSONResponse(content={
+        'status': 'success' if proxies else 'error',
+        'proxies': proxies,
+        'count': len(proxies),
+        'message': error_msg if not proxies else ''
+    })
 
 
 # ===================== 异步后台任务 =====================
@@ -1382,96 +1301,10 @@ async def async_login_keepalive_worker():
         except:
             await asyncio.sleep(60)
 
-async def async_inventory_monitoring_worker():
-    """
-    异步库存监控 - 50ms 轮询，每次只检查1个账号
-    遵循需求：每50ms只选取1个账号去请求库存接口，轮询分配
-    """
-    global stock_monitoring_active, is_stock_available, inventory_broadcast_status
-    account_index = 0
-    while stock_monitoring_active:
-        try:
-            now = datetime.datetime.now()
-            if now.hour >= INVENTORY_MONITORING_END_HOUR:
-                stock_monitoring_active = False
-                with SessionLocal() as db:
-                    cfg = get_user_config(1, db)  # admin 的配置
-                    if cfg:
-                        cfg.inventory_monitoring = 0
-                        db.commit()
-                break
-            with SessionLocal() as db:
-                all_logged_in = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True).all()
-                if not all_logged_in:
-                    await asyncio.sleep(5)
-                    continue
-                num = len(all_logged_in)
-                if num == 0:
-                    await asyncio.sleep(5)
-                    continue
-                # 轮询分配：每次只检查1个账号，50ms间隔
-                idx = account_index % num
-                account_index += 1
-                rec = all_logged_in[idx]
-                creds = build_credentials_from_db(rec.phone, db)
-                item_code = rec.item_code if rec.item_code else '741'
-                available = await _bridge.check_inventory(rec.phone, item_code, creds)
-                if available > 0:
-                    is_stock_available = True
-                    inventory_broadcast_status = 'available'
-                    print(f'[库存监控] {rec.phone} 发现库存: {available}')
-                    # 通知所有客户端
-                    await broadcast_inventory_status('available')
-            await asyncio.sleep(0.05)  # 50ms 间隔
-        except:
-            await asyncio.sleep(0.05)
-
-async def broadcast_inventory_status(status: str):
-    """树状广播库存状态到所有已注册客户端"""
-    global inventory_broadcast_status
-    inventory_broadcast_status = status
-    async with broadcast_tree_lock:
-        client_ids = list(broadcast_clients.keys())
-    if not client_ids:
-        return
-    # 树状扩散：先通知10个，每个再通知10个...
-    await _tree_broadcast(client_ids, status, 0, 10)
-
-async def _tree_broadcast(client_ids: list, status: str, start_idx: int, fanout: int):
-    """树状广播扩散"""
-    end_idx = min(start_idx + fanout, len(client_ids))
-    batch = client_ids[start_idx:end_idx]
-    tasks = []
-    for cid in batch:
-        info = broadcast_clients.get(cid)
-        if not info:
-            continue
-        url = info.get('callback_url', '')
-        if url:
-            tasks.append(_notify_single_client(url, status))
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    # 递归通知下一层
-    if end_idx < len(client_ids):
-        await _tree_broadcast(client_ids, status, end_idx, fanout * 10)
-
-async def _notify_single_client(url: str, status: str):
-    """通知单个客户端"""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(url, json={'status': status, 'type': 'inventory_broadcast'},
-                headers={'X-API-TOKEN': Config.API_TOKEN})
-    except:
-        pass
-
 def start_background_tasks_async():
     """启动所有异步后台任务"""
     global _background_tasks
     _background_tasks.append(asyncio.create_task(async_login_keepalive_worker()))
-    _background_tasks.append(asyncio.create_task(_proxy_purge_scheduler()))
-    _background_tasks.append(asyncio.create_task(_account_pre_detect_scheduler()))
-    _background_tasks.append(asyncio.create_task(_ready_pool_refill_scheduler()))
-    # 库存监控默认不启动，用户可在设置页面手动开启
 
 # ===================== 健康检查 =====================
 @app.get("/api/health")
@@ -1542,36 +1375,6 @@ async def register_post(request: Request):
 async def logout(request: Request):
     logout_user_fastapi(request)
     return RedirectResponse(url="/login")
-
-# ===================== 养猫 App API（Bearer Token 认证） =====================
-_app_token_store: dict = {}  # token -> user_id
-
-def _issue_app_token(user_id: int) -> str:
-    token = _uuid.uuid4().hex
-    _app_token_store[token] = user_id
-    return token
-
-def _get_app_user(
-    request: Request,
-    db: SQLSession = Depends(get_db),
-):
-    """Bearer Token 认证，用于 /api/app/* 接口"""
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未提供令牌")
-    token = auth[7:]
-    user_id = _app_token_store.get(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="令牌无效或已过期")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="用户不存在")
-    return user
-
-# ══════════════════════════════════════════════════════════
-# /api/app/register 和 /api/app/login 已迁移至 routes/api_app.py
-# 通过 app.include_router(api_app_router) 注册
-# ══════════════════════════════════════════════════════════
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
@@ -1712,49 +1515,14 @@ async def bind_account_submit_code(request: Request, db: SQLSession = Depends(ge
     login_result = await _bridge.login(phone, code, creds)
     if login_result.get('error'):
         return JSONResponse(content={'status': 'error', 'message': f'登录失败: {login_result["error"]}'}, status_code=400)
-    record.token = login_result.get('token', ''); record.cookie = login_result.get('cookie', '')
-    record.user_id_ext = login_result.get('user_id_ext', ''); record.logged_in = True
-    record.last_updated = datetime.datetime.utcnow()
-    record.login_time = datetime.datetime.now()
-    db.commit()
-    save_account_to_json_from_creds(phone, login_result, uploader or "admin")
+    _apply_login_result(record, login_result, db, phone)
     # 绑定成功后立即检测白号/黑号
-    account_type_msg = ''
     try:
-        creds = build_credentials_from_db(phone, db)
-        item_code = record.item_code or 'IMTP1000313'
-        detail_result = await _bridge._post('/api/bridge/execute', {
-            'method': 'auto_fetch_item_details',
-            'params': {'item_code': item_code, 'spu_id': item_code},
-            'credentials': creds
-        })
-        if detail_result.get('success'):
-            d = detail_result.get('result', {})
-            sku_id = d.get('default_sku_id', '741')
-            item_code_rush = d.get('item_code_from_api', '1001017')
-            act_id = d.get('activity_id', '82107')
-        else:
-            sku_id = '741'; item_code_rush = '1001017'; act_id = '82107'
-        rush_result = await _bridge._post('/api/bridge/execute', {
-            'method': 'rush_purchase',
-            'params': {'item_code': item_code_rush, 'sku_id': sku_id, 'item_priority_act_id': act_id, 'amount': '1'},
-            'credentials': creds
-        })
-        if rush_result.get('success'):
-            rush_data = rush_result.get('result', {})
-            r_code = rush_data.get('code')
-            r_msg = rush_data.get('message', '')
-            if r_code == 2000:
-                pass  # 抢购成功，不判断
-            elif r_code in (4031, 4099) or '请求人数过多' in r_msg or '库存不足' in r_msg:
-                record.account_type = 'black'
-                account_type_msg = '（黑号）'
-            elif r_code in (4293,) or '人数较多' in r_msg or '活动未开始' in r_msg or '未开始' in r_msg:
-                record.account_type = 'white'
-                account_type_msg = '（白号）'
-            db.commit()
+        at = await _detect_account_type(phone, db)
+        account_type_msg = {'black': '（黑号）', 'white': '（白号）'}.get(at, '')
     except Exception as e:
         print(f'[绑定检测] {phone} 白号/黑号检测失败: {e}')
+        account_type_msg = ''
     return JSONResponse(content={'status': 'success', 'message': f'绑定成功{account_type_msg}', 'account_type': record.account_type})
 
 @app.get("/api/bind_account/list")
@@ -1780,64 +1548,9 @@ async def bind_account_list(request: Request, db: SQLSession = Depends(get_db)):
         })
     return JSONResponse(content={'records': record_list})
 
-# ===================== API：库存监控 =====================
-@app.get("/api/inventory_status")
-async def inventory_status(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """获取库存监控状态（全局状态由admin控制，每用户可独立设置监控偏好）"""
-    global stock_monitoring_active
-    cfg = get_user_config(user.id, db)
-    db_monitoring = cfg.inventory_monitoring
-    return JSONResponse(content={
-        'stock_monitoring_active': stock_monitoring_active,
-        'is_stock_available': is_stock_available,
-        'active_monitors_count': len(active_monitors),
-        'inventory_monitoring_db': db_monitoring,
-        'active_client_windows': get_active_client_count()
-    })
-
-@app.post("/api/start_inventory_monitoring")
-async def start_inventory_monitoring(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """启动库存监控（仅管理员可控制全局监控任务）"""
-    global stock_monitoring_active
-    if user.id != 1 and user.username.lower() != "admin":
-        # 非管理员用户：仅保存偏好，不控制全局监控
-        cfg = get_user_config(user.id, db)
-        cfg.inventory_monitoring = 1
-        db.commit()
-        return JSONResponse(content={'status': 'success', 'message': '监控偏好已保存（需管理员启动全局监控）'})
-    stock_monitoring_active = True
-    cfg = get_user_config(user.id, db)
-    cfg.inventory_monitoring = 1
-    db.commit()
-    _background_tasks.append(asyncio.create_task(async_inventory_monitoring_worker()))
-    return JSONResponse(content={'status': 'success', 'message': '库存监控已启动'})
-
-@app.post("/api/stop_inventory_monitoring")
-async def stop_inventory_monitoring(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """停止库存监控（仅管理员可控制全局监控任务）"""
-    global stock_monitoring_active
-    if user.id != 1 and user.username.lower() != "admin":
-        # 非管理员用户：仅保存偏好，不控制全局监控
-        cfg = get_user_config(user.id, db)
-        cfg.inventory_monitoring = 0
-        db.commit()
-        return JSONResponse(content={'status': 'success', 'message': '监控偏好已保存（需管理员停止全局监控）'})
-    stock_monitoring_active = False
-    cfg = get_user_config(user.id, db)
-    cfg.inventory_monitoring = 0
-    db.commit()
-    return JSONResponse(content={'status': 'success', 'message': '库存监控已停止'})
 
 
-# ===================== QR码、商品 =====================
-@app.get("/qrcode/{phone}")
-async def get_qrcode(phone: str, user: User = Depends(get_current_user)):
-    qrcode_file = os.path.join(QRCODE_FOLDER, f"{phone}.png")
-    if os.path.exists(qrcode_file):
-        return FileResponse(qrcode_file)
-    raise HTTPException(status_code=404)
-
-
+# ===================== 商品 =====================
 @app.get("/api/sample_products")
 async def sample_products(user: User = Depends(get_current_user)):
     return JSONResponse(content=[
@@ -1977,11 +1690,7 @@ async def api_submit_code(request: Request, user: User = Depends(get_current_use
     login_result = await _bridge.login(phone, code, creds)
     if login_result.get('error'):
         raise HTTPException(status_code=400, detail=f'登录失败: {login_result["error"]}')
-    record.token = login_result.get('token', ''); record.cookie = login_result.get('cookie', '')
-    record.user_id_ext = login_result.get('user_id_ext', ''); record.logged_in = True
-    record.last_updated = datetime.datetime.utcnow()
-    record.login_time = datetime.datetime.now()
-    db.commit(); save_account_to_json_from_creds(phone, login_result, record.uploader_name or "admin")
+    _apply_login_result(record, login_result, db, phone)
     return JSONResponse(content={'status': 'success', 'message': '登录成功'})
 
 
@@ -2004,11 +1713,7 @@ async def receive_sms(request: Request, db: SQLSession = Depends(get_db)):
     login_result = await _bridge.login(phone, code, creds)
     if login_result.get('error'):
         raise HTTPException(status_code=400, detail=f'登录失败: {login_result["error"]}')
-    record.token = login_result.get('token', ''); record.cookie = login_result.get('cookie', '')
-    record.user_id_ext = login_result.get('user_id_ext', ''); record.logged_in = True
-    record.last_updated = datetime.datetime.utcnow()
-    record.login_time = datetime.datetime.now()
-    db.commit(); save_account_to_json_from_creds(phone, login_result, record.uploader_name or "admin")
+    _apply_login_result(record, login_result, db, phone)
     return JSONResponse(content={'status': 'success', 'message': '自动登录成功'})
 
 
@@ -2047,7 +1752,6 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: SQ
     success_login = base.filter(PhoneRecord.logged_in == True).count()
     offline = base.filter(PhoneRecord.logged_in == False, (PhoneRecord.token != '') | (PhoneRecord.cookie != '')).count()
     never_login = base.filter(PhoneRecord.logged_in == False, PhoneRecord.token == '', PhoneRecord.cookie == '').count()
-    qrcode_count = sum(1 for rec in base.all() if os.path.exists(os.path.join(QRCODE_FOLDER, f"{rec.phone}.png")))
     bid_success = base.filter(PhoneRecord.bid_result.contains('成功')).count()
     # 白号/黑号计数
     all_records = base.all()
@@ -2056,17 +1760,6 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: SQ
     logged_in_count = base.filter(PhoneRecord.logged_in == True).count()
     multi_open_count = cfg.multi_open_count or 1
     total_windows = (logged_in_count + multi_open_count - 1) // multi_open_count if logged_in_count > 0 else 0
-    # 代理IP统计
-    pool_count = proxy_manager.pool_size()
-    # 统计数据库中已绑定IP的账号数（去重IP数）
-    if user.username.lower() == 'admin':
-        bound_records = db.query(PhoneRecord).filter(PhoneRecord.proxy_ip != '').all()
-    else:
-        bound_records = db.query(PhoneRecord).filter(PhoneRecord.proxy_ip != '', PhoneRecord.user_id == user.id).all()
-    unique_ips = set(r.proxy_ip for r in bound_records if r.proxy_ip)
-    ip_bound_count = len(bound_records)
-    ip_unique_count = len(unique_ips)
-    discarded_count = len(proxy_manager.all_discarded())
     # 团队统计
     teams = db.query(Team).filter(Team.owner_user_id == user.id).all()
     team_stats = []
@@ -2096,18 +1789,12 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: SQ
         team_unpaid += t_unpaid
     return JSONResponse(content={
         'total': total, 'success_login': success_login, 'offline': offline,
-        'never_login': never_login, 'bid_success': bid_success, 'qrcode_count': qrcode_count,
+        'never_login': never_login, 'bid_success': bid_success,
         'active_client_windows': get_active_client_count(),
         'server_count': len(server_list),
         'logged_in_count': logged_in_count, 'total_windows': total_windows,
         'white_count': white_count, 'black_count': black_count,
         'multi_open_count': multi_open_count, 'multi_open_enabled': cfg.multi_open_enabled,
-        # IP统计
-        'ip_pool_count': pool_count,
-        'ip_ready_pool_count': proxy_manager.ready_pool_size(),
-        'ip_bound_count': ip_bound_count,
-        'ip_unique_count': ip_unique_count,
-        'ip_discarded_count': discarded_count,
         # 团队统计
         'teams': team_stats,
         'team_total_accounts': team_total_accounts,
@@ -2141,12 +1828,9 @@ async def batch_send_code(request: Request, user: User = Depends(get_current_use
 async def clear_all_records(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
     try:
         records = db.query(PhoneRecord).filter(PhoneRecord.user_id == user.id).all()
-        for rec in records:
-            qrcode_path = os.path.join(QRCODE_FOLDER, f"{rec.phone}.png")
-            if os.path.exists(qrcode_path): os.remove(qrcode_path)
         db.query(PhoneRecord).filter(PhoneRecord.user_id == user.id).delete()
         db.commit()
-        return JSONResponse(content={'status': 'success', 'message': '已清空所有账号及二维码'})
+        return JSONResponse(content={'status': 'success', 'message': '已清空所有账号'})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2259,10 +1943,18 @@ async def phone_proxy_websocket(websocket: WebSocket):
                 print(f'[手机WS] {name} 已注册 | device={device_id} | uid={user_id}')
 
             elif msg_type == 'rush_result':
-                print(f'[手机WS] 抢购结果: {msg.get("round_id", "")} | {len(msg.get("results", []))}条')
+                round_id = msg.get('round_id', '')
+                results = msg.get('results', [])
+                logs = msg.get('logs', '')
+                print(f'[手机WS] 抢购结果: {round_id} | {len(results)}条 | 日志={len(logs)}字符')
+                # 保存到 client_logs/ 目录（与 HTTP upload_log 一致）
+                _save_phone_ws_log(device_id, round_id, logs, 'result')
 
             elif msg_type == 'rush_logs':
-                print(f'[手机WS] 抢购日志: {msg.get("round_id", "")} | {len(msg.get("logs", ""))}字符')
+                round_id = msg.get('round_id', '')
+                logs = msg.get('logs', '')
+                print(f'[手机WS] 抢购日志: {round_id} | {len(logs)}字符')
+                _save_phone_ws_log(device_id, round_id, logs, 'logs')
 
             elif msg_type == 'ip_changed':
                 print(f'[手机WS] IP变更: {msg.get("old_ip", "")} → {msg.get("new_ip", "")}')
@@ -2416,57 +2108,8 @@ async def check_account_type(request: Request, user: User = Depends(get_current_
         if i > 0:
             await asyncio.sleep(random.uniform(0.05, 0.5))  # 50~500ms随机延迟，避免429
         try:
-            creds = build_credentials_from_db(rec.phone, db)
-            # 获取商品参数
-            item_code = rec.item_code or 'IMTP1000313'
-            detail_result = await _bridge._post('/api/bridge/execute', {
-                'method': 'auto_fetch_item_details',
-                'params': {'item_code': item_code, 'spu_id': item_code},
-                'credentials': creds
-            })
-            if detail_result.get('success'):
-                d = detail_result.get('result', {})
-                sku_id = d.get('default_sku_id', '741')
-                item_code_rush = d.get('item_code_from_api', '1001017')
-                act_id = d.get('activity_id', '82107')
-            else:
-                sku_id = '741'
-                item_code_rush = '1001017'
-                act_id = '82107'
-            
-            # 调用一次 rush_purchase
-            rush_result = await _bridge._post('/api/bridge/execute', {
-                'method': 'rush_purchase',
-                'params': {
-                    'item_code': item_code_rush,
-                    'sku_id': sku_id,
-                    'item_priority_act_id': act_id,
-                    'amount': '1'
-                },
-                'credentials': creds
-            })
-            
-            if rush_result.get('success'):
-                rush_data = rush_result.get('result', {})
-                code = rush_data.get('code')
-                msg = rush_data.get('message', '')
-                
-                if code == 2000:
-                    # 抢购成功（意外情况），不修改 account_type
-                    results[rec.phone] = {'account_type': rec.account_type or '', 'message': '抢购成功，跳过判断'}
-                elif code in (4031, 4099) or '请求人数过多' in msg or '库存不足' in msg:
-                    # 黑号：请求人数过多/库存不足
-                    rec.account_type = 'black'
-                    results[rec.phone] = {'account_type': 'black', 'message': msg}
-                elif code in (4293,) or '人数较多' in msg or '活动未开始' in msg or '未开始' in msg:
-                    # 白号：人数较多/活动未开始
-                    rec.account_type = 'white'
-                    results[rec.phone] = {'account_type': 'white', 'message': msg}
-                else:
-                    # 其他情况，不修改
-                    results[rec.phone] = {'account_type': rec.account_type or '', 'message': msg}
-            else:
-                results[rec.phone] = {'account_type': rec.account_type or '', 'message': '桥接调用失败'}
+            at = await _detect_account_type(rec.phone, db)
+            results[rec.phone] = {'account_type': at, 'message': f'检测为{at}' if at else '未判定'}
         except Exception as e:
             results[rec.phone] = {'account_type': rec.account_type or '', 'message': f'异常: {str(e)[:50]}'}
     
@@ -2495,53 +2138,9 @@ async def check_account_type_single(request: Request, user: User = Depends(get_c
         return JSONResponse(content={'status': 'error', 'message': '账号未登录，无法判断'}, status_code=400)
     
     try:
-        creds = build_credentials_from_db(phone, db)
-        item_code = record.item_code or 'IMTP1000313'
-        detail_result = await _bridge._post('/api/bridge/execute', {
-            'method': 'auto_fetch_item_details',
-            'params': {'item_code': item_code, 'spu_id': item_code},
-            'credentials': creds
-        })
-        if detail_result.get('success'):
-            d = detail_result.get('result', {})
-            sku_id = d.get('default_sku_id', '741')
-            item_code_rush = d.get('item_code_from_api', '1001017')
-            act_id = d.get('activity_id', '82107')
-        else:
-            sku_id = '741'
-            item_code_rush = '1001017'
-            act_id = '82107'
-        
-        rush_result = await _bridge._post('/api/bridge/execute', {
-            'method': 'rush_purchase',
-            'params': {
-                'item_code': item_code_rush,
-                'sku_id': sku_id,
-                'item_priority_act_id': act_id,
-                'amount': '1'
-            },
-            'credentials': creds
-        })
-        
-        if rush_result.get('success'):
-            rush_data = rush_result.get('result', {})
-            code = rush_data.get('code')
-            msg = rush_data.get('message', '')
-            
-            if code == 2000:
-                return JSONResponse(content={'status': 'success', 'account_type': record.account_type or '', 'message': '抢购成功，跳过判断'})
-            elif code in (4031, 4099) or '请求人数过多' in msg or '库存不足' in msg:
-                record.account_type = 'black'
-                db.commit()
-                return JSONResponse(content={'status': 'success', 'account_type': 'black', 'message': msg})
-            elif code in (4293,) or '人数较多' in msg or '活动未开始' in msg or '未开始' in msg:
-                record.account_type = 'white'
-                db.commit()
-                return JSONResponse(content={'status': 'success', 'account_type': 'white', 'message': msg})
-            else:
-                return JSONResponse(content={'status': 'success', 'account_type': record.account_type or '', 'message': msg})
-        else:
-            return JSONResponse(content={'status': 'error', 'message': '桥接调用失败'}, status_code=500)
+        at = await _detect_account_type(phone, db)
+        msg_map = {'black': '黑号', 'white': '白号'}
+        return JSONResponse(content={'status': 'success', 'account_type': at, 'message': msg_map.get(at, '未判定')})
     except Exception as e:
         return JSONResponse(content={'status': 'error', 'message': f'异常: {str(e)}'}, status_code=500)
 
@@ -2597,10 +2196,7 @@ async def refresh_login(user: User = Depends(get_current_user), db: SQLSession =
     # 检查代理开关和API地址
     up = get_user_proxy(user.id, db)
     proxy_enabled = up.proxy_enabled if up else False
-    proxy_api_url = up.proxy_url if up else ''  # 豌豆代理API完整地址
-    
-    # 代理黑号计数器：IP -> 黑号数量（3次黑号则丢弃IP）
-    ip_black_count = {}
+    proxy_api_url = up.proxy_url if up else ''  # 代理API完整地址
     
     for i, phone in enumerate([r.phone for r in records]):
         if i > 0:
@@ -2612,35 +2208,10 @@ async def refresh_login(user: User = Depends(get_current_user), db: SQLSession =
             has_db_data = record and bool(record.token)
             print(f'[刷新登录] {phone} 数据库登录数据: {"有" if has_db_data else "无"}')
             
-            # === 代理IP绑定逻辑 ===
+            # === 代理IP：直接从服务商获取（不存DB） ===
             current_proxy = ''
             if proxy_enabled:
-                # 如果账号已有绑定的代理IP且未被丢弃，复用
-                if record and record.proxy_ip and record.proxy_ip not in proxy_manager._discarded:
-                    current_proxy = record.proxy_ip
-                else:
-                    # 分配新代理IP（经就绪池/现场测试，确保IP可用）
-                    current_proxy = await _test_and_assign_ip(user.id, proxy_api_url, db)
-                    if record:
-                        record.proxy_ip = current_proxy
-                        db.commit()
-                
-                # 检查IP是否被3次黑号标记丢弃
-                if current_proxy and ip_black_count.get(current_proxy, 0) >= 3:
-                    print(f'[代理] IP {current_proxy} 已累积3次黑号，丢弃IP并删除关联黑号')
-                    proxy_manager.discard_proxy(current_proxy)
-                    black_with_ip = db.query(PhoneRecord).filter(
-                        PhoneRecord.proxy_ip == current_proxy,
-                        PhoneRecord.account_type == 'black'
-                    ).all()
-                    for bw in black_with_ip:
-                        print(f'[代理] 删除黑号: {bw.phone}')
-                        db.delete(bw)
-                    db.commit()
-                    current_proxy = await _test_and_assign_ip(user.id, proxy_api_url, db)
-                    if record:
-                        record.proxy_ip = current_proxy
-                        db.commit()
+                current_proxy = await _alloc_proxy_for_client(proxy_api_url)
             
             # 2. 如果数据库没有登录数据，尝试从 iplala_accounts.json 恢复
             if not has_db_data:
@@ -2674,26 +2245,22 @@ async def refresh_login(user: User = Depends(get_current_user), db: SQLSession =
                 valid = await check_login_validity_async(phone, proxy_url=current_proxy)
                 if valid is None:
                     print(f'[刷新登录] {phone} 桥接不可达，跳过登录验证')
-                    results[phone] = {'valid': None, 'status_desc': 'unknown', 'account_type': record.account_type if record else '', 'proxy_ip': record.proxy_ip if record else ''}
+                    results[phone] = {'valid': None, 'status_desc': 'unknown', 'account_type': record.account_type if record else '', 'proxy_ip': current_proxy}
                     continue
                 print(f'[刷新登录] {phone} 登录验证结果: {"有效" if valid else "无效/掉线"} | 代理={current_proxy or "无"}')
-                # 代理场景：如果验证失败且使用代理，可能是IP被封
+                # 代理场景：如果验证失败且使用代理，换新IP重试
                 if not valid and proxy_enabled and current_proxy:
-                    print(f'[刷新登录] {phone} 登录验证失败，IP {current_proxy} 可能被封，丢弃换新IP')
-                    proxy_manager.discard_proxy(current_proxy)
-                    new_proxy = await _test_and_assign_ip(user.id, proxy_api_url, db)
-                    if record:
-                        record.proxy_ip = new_proxy
-                        db.commit()
+                    print(f'[刷新登录] {phone} 登录验证失败，IP {current_proxy} 可能被封，换新IP重试')
+                    new_proxy = await _alloc_proxy_for_client(proxy_api_url)
                     current_proxy = new_proxy
-                    # 用新IP重试
-                    print(f'[刷新登录] {phone} 用新IP {new_proxy} 重试验证...')
-                    valid = await check_login_validity_async(phone, proxy_url=new_proxy)
-                    if valid is None:
-                        print(f'[刷新登录] {phone} 重试时桥接不可达，保留原数据')
-                        results[phone] = {'valid': None, 'status_desc': 'unknown', 'account_type': record.account_type if record else '', 'proxy_ip': record.proxy_ip if record else ''}
-                        continue
-                    print(f'[刷新登录] {phone} 重试验证结果: {"有效" if valid else "无效/掉线"}')
+                    if new_proxy:
+                        print(f'[刷新登录] {phone} 用新IP {new_proxy} 重试验证...')
+                        valid = await check_login_validity_async(phone, proxy_url=new_proxy)
+                        if valid is None:
+                            print(f'[刷新登录] {phone} 重试时桥接不可达，保留原数据')
+                            results[phone] = {'valid': None, 'status_desc': 'unknown', 'account_type': record.account_type if record else '', 'proxy_ip': current_proxy}
+                            continue
+                        print(f'[刷新登录] {phone} 重试验证结果: {"有效" if valid else "无效/掉线"}')
                 
                 update_login_status(phone, valid, db)
                 sync_login_time_from_json(phone, db)
@@ -2705,61 +2272,17 @@ async def refresh_login(user: User = Depends(get_current_user), db: SQLSession =
                 if valid and rec and not rec.account_type:
                     print(f'[刷新登录] {phone} 登录有效且未判定白号/黑号，开始测试下单检测...')
                     try:
-                        creds = build_credentials_from_db(phone, db)
-                        item_code = rec.item_code or 'IMTP1000313'
-                        print(f'[刷新登录] {phone} 获取商品详情, item_code={item_code}')
-                        detail_result = await _bridge._post('/api/bridge/execute', {
-                            'method': 'auto_fetch_item_details',
-                            'params': {'item_code': item_code, 'spu_id': item_code},
-                            'credentials': creds,
-                            'proxy_url': current_proxy
-                        })
-                        if detail_result.get('success'):
-                            d = detail_result.get('result', {})
-                            sku_id = d.get('default_sku_id', '741')
-                            item_code_rush = d.get('item_code_from_api', '1001017')
-                            act_id = d.get('activity_id', '82107')
-                            print(f'[刷新登录] {phone} 商品详情成功 | sku_id={sku_id} | item_code_rush={item_code_rush} | act_id={act_id}')
-                        else:
-                            sku_id = '741'; item_code_rush = '1001017'; act_id = '82107'
-                            print(f'[刷新登录] {phone} 商品详情失败，使用默认值 | sku_id={sku_id} | item_code_rush={item_code_rush} | act_id={act_id}')
-                        print(f'[刷新登录] {phone} 发起测试下单(rush_purchase)...')
-                        rush_result = await _bridge._post('/api/bridge/execute', {
-                            'method': 'rush_purchase',
-                            'params': {'item_code': item_code_rush, 'sku_id': sku_id, 'item_priority_act_id': act_id, 'amount': '1'},
-                            'credentials': creds,
-                            'proxy_url': current_proxy
-                        })
-                        if rush_result.get('success'):
-                            rush_data = rush_result.get('result', {})
-                            r_code = rush_data.get('code')
-                            r_msg = rush_data.get('message', '')
-                            print(f'[刷新登录] {phone} 下单返回 | code={r_code} | message={r_msg}')
-                            if r_code == 2000:
-                                print(f'[刷新登录] {phone} ⚠️ 测试下单成功(code=2000)，跳过判定')
-                            elif r_code in (4031, 4099) or '请求人数过多' in r_msg or '库存不足' in r_msg:
-                                rec.account_type = 'black'
-                                print(f'[刷新登录] {phone} 判定为黑号(code={r_code})')
-                                # 代理黑号计数+1
-                                if current_proxy:
-                                    ip_black_count[current_proxy] = ip_black_count.get(current_proxy, 0) + 1
-                                    print(f'[刷新登录] IP {current_proxy} 黑号计数: {ip_black_count[current_proxy]}/3')
-                            elif r_code in (4293,) or '人数较多' in r_msg or '活动未开始' in r_msg or '未开始' in r_msg:
-                                rec.account_type = 'white'
-                                print(f'[刷新登录] {phone} 判定为白号(人数较多/活动未开始)')
-                            else:
-                                print(f'[刷新登录] {phone} 未匹配已知判定规则，不修改account_type')
-                            db.commit()
-                        else:
-                            print(f'[刷新登录] {phone} rush_purchase调用失败: {rush_result}')
-                        account_type = rec.account_type
+                        at = await _detect_account_type(phone, db, proxy_url=current_proxy)
+                        if at:
+                            print(f'[刷新登录] {phone} 判定为{at}')
+                        account_type = at
                     except Exception as e:
                         print(f'[刷新登录] {phone} 测试下单检测异常: {e}')
                 elif valid and rec and rec.account_type:
                     print(f'[刷新登录] {phone} 登录有效，已有判定: {rec.account_type}，跳过测试下单')
                 elif not valid:
                     print(f'[刷新登录] {phone} 登录无效/掉线，跳过测试下单')
-                results[phone] = {'valid': valid, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': record.proxy_ip if record else ''}
+                results[phone] = {'valid': valid, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': current_proxy}
                 print(f'[刷新登录] {phone} 处理完成 | 状态={status_desc} | 账号类型={account_type}')
             else:
                 # 没有任何数据
@@ -2813,32 +2336,12 @@ async def refresh_login_single(request: Request, user: User = Depends(get_curren
         has_db_data = record and bool(record.token)
         print(f'[单号刷新] {phone} 数据库登录数据: {"有" if has_db_data else "无"}')
 
-        # 代理IP绑定 + 可用性测试
-        ip_status = 'none'  # none/ok/dead/replaced
+        # 代理IP：直接从服务商获取（不存DB）
+        ip_status = 'none'
         if proxy_enabled:
-            if record.proxy_ip and record.proxy_ip not in proxy_manager._discarded:
-                # 先测试已有IP是否被CDN封禁
-                ip_test = await _test_proxy_ip(record.proxy_ip, timeout=5.0)
-                if ip_test.get('ok'):
-                    current_proxy = record.proxy_ip
-                    ip_status = 'ok'
-                    print(f'[单号刷新] {phone} 复用IP且可用: {current_proxy}')
-                else:
-                    print(f'[单号刷新] {phone} 旧IP被封({ip_test.get("reason")})，丢弃换新IP')
-                    proxy_manager.discard_proxy(record.proxy_ip)
-                    current_proxy = await _test_and_assign_ip(user.id, proxy_api_url, db)
-                    record.proxy_ip = current_proxy
-                    db.commit()
-                    ip_status = 'replaced' if current_proxy else 'dead'
-                    print(f'[单号刷新] {phone} 新IP: {current_proxy or "无可用IP"}')
-            else:
-                if record.proxy_ip:
-                    print(f'[单号刷新] {phone} 旧IP已丢弃({record.proxy_ip})，分配新IP')
-                current_proxy = await _test_and_assign_ip(user.id, proxy_api_url, db)
-                record.proxy_ip = current_proxy
-                db.commit()
-                ip_status = 'replaced' if current_proxy else 'dead'
-                print(f'[单号刷新] {phone} 新绑定IP: {current_proxy or "无可用IP"}')
+            current_proxy = await _alloc_proxy_for_client(proxy_api_url)
+            ip_status = 'ok' if current_proxy else 'dead'
+            print(f'[单号刷新] {phone} 代理IP: {current_proxy or "无可用IP"}')
 
         # 尝试从 accounts.json 恢复
         if not has_db_data:
@@ -2866,7 +2369,7 @@ async def refresh_login_single(request: Request, user: User = Depends(get_curren
                 print(f'[单号刷新] {phone} 备份文件中也无数据')
                 return JSONResponse(content={
                     'status': 'success',
-                    'results': {phone: {'valid': False, 'status_desc': 'never', 'account_type': '', 'proxy_ip': record.proxy_ip or '', 'ip_status': ip_status}}
+                    'results': {phone: {'valid': False, 'status_desc': 'never', 'account_type': '', 'proxy_ip': '', 'ip_status': ip_status}}
                 })
 
         # 验证登录有效性
@@ -2877,20 +2380,18 @@ async def refresh_login_single(request: Request, user: User = Depends(get_curren
                 print(f'[单号刷新] {phone} 桥接不可达，跳过登录状态更新，保留现有数据')
                 status_desc = _get_login_status_desc(phone, False, db)
                 account_type = record.account_type or ''
-                print(f'[单号刷新] {phone} 处理完成 | 状态={status_desc}(未验证) | 账号类型={account_type} | IP={record.proxy_ip or "无"} | IP状态={ip_status}')
+                print(f'[单号刷新] {phone} 处理完成 | 状态={status_desc}(未验证) | 账号类型={account_type} | IP={current_proxy or "无"} | IP状态={ip_status}')
                 return JSONResponse(content={
                     'status': 'success',
-                    'results': {phone: {'valid': None, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': record.proxy_ip or '', 'ip_status': ip_status}}
+                    'results': {phone: {'valid': None, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': current_proxy, 'ip_status': ip_status}}
                 })
             print(f'[单号刷新] {phone} 登录验证结果: {"有效" if valid else "无效/掉线"}')
 
             if not valid and proxy_enabled and current_proxy:
-                print(f'[单号刷新] {phone} 登录验证失败，IP {current_proxy} 可能被封，丢弃换新IP')
-                proxy_manager.discard_proxy(current_proxy)
-                new_proxy = await _test_and_assign_ip(user.id, proxy_api_url, db)
-                record.proxy_ip = new_proxy
-                db.commit()
+                print(f'[单号刷新] {phone} 登录验证失败，IP {current_proxy} 可能被封，换新IP重试')
+                new_proxy = await _alloc_proxy_for_client(proxy_api_url)
                 current_proxy = new_proxy
+                ip_status = 'replaced' if current_proxy else 'dead'
                 if new_proxy:
                     print(f'[单号刷新] {phone} 用新IP {new_proxy} 重试验证...')
                     valid = await check_login_validity_async(phone, proxy_url=new_proxy)
@@ -2900,7 +2401,7 @@ async def refresh_login_single(request: Request, user: User = Depends(get_curren
                         account_type = record.account_type or ''
                         return JSONResponse(content={
                             'status': 'success',
-                            'results': {phone: {'valid': None, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': record.proxy_ip or '', 'ip_status': ip_status}}
+                            'results': {phone: {'valid': None, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': current_proxy, 'ip_status': ip_status}}
                         })
                     print(f'[单号刷新] {phone} 重试验证结果: {"有效" if valid else "无效/掉线"}')
                 else:
@@ -2915,56 +2416,24 @@ async def refresh_login_single(request: Request, user: User = Depends(get_curren
             if valid and record and not record.account_type:
                 print(f'[单号刷新] {phone} 登录有效且未判定白号/黑号，开始测试下单检测...')
                 try:
-                    creds = build_credentials_from_db(phone, db)
-                    item_code = record.item_code or 'IMTP1000313'
-                    detail_result = await _bridge._post('/api/bridge/execute', {
-                        'method': 'auto_fetch_item_details',
-                        'params': {'item_code': item_code, 'spu_id': item_code},
-                        'credentials': creds,
-                        'proxy_url': current_proxy
-                    })
-                    if detail_result.get('success'):
-                        d = detail_result.get('result', {})
-                        sku_id = d.get('default_sku_id', '741')
-                        item_code_rush = d.get('item_code_from_api', '1001017')
-                        act_id = d.get('activity_id', '82107')
-                    else:
-                        sku_id = '741'; item_code_rush = '1001017'; act_id = '82107'
-                    rush_result = await _bridge._post('/api/bridge/execute', {
-                        'method': 'rush_purchase',
-                        'params': {'item_code': item_code_rush, 'sku_id': sku_id, 'item_priority_act_id': act_id, 'amount': '1'},
-                        'credentials': creds,
-                        'proxy_url': current_proxy
-                    })
-                    if rush_result.get('success'):
-                        rush_data = rush_result.get('result', {})
-                        r_code = rush_data.get('code')
-                        r_msg = rush_data.get('message', '')
-                        print(f'[单号刷新] {phone} 下单返回 | code={r_code} | message={r_msg}')
-                        if r_code == 2000:
-                            print(f'[单号刷新] {phone} ⚠️ 测试下单成功(code=2000)，跳过判定')
-                        elif r_code in (4031, 4099) or '请求人数过多' in r_msg or '库存不足' in r_msg:
-                            record.account_type = 'black'
-                            print(f'[单号刷新] {phone} 判定为黑号')
-                        elif r_code in (4293,) or '人数较多' in r_msg or '活动未开始' in r_msg or '未开始' in r_msg:
-                            record.account_type = 'white'
-                            print(f'[单号刷新] {phone} 判定为白号')
-                        db.commit()
-                    account_type = record.account_type
+                    at = await _detect_account_type(phone, db, proxy_url=current_proxy)
+                    if at:
+                        print(f'[单号刷新] {phone} 判定为{at}')
+                    account_type = at
                 except Exception as e:
                     print(f'[单号刷新] {phone} 测试下单检测异常: {e}')
             elif valid and record and record.account_type:
                 print(f'[单号刷新] {phone} 登录有效，已有判定: {record.account_type}，跳过测试下单')
 
-            print(f'[单号刷新] {phone} 处理完成 | 状态={status_desc} | 账号类型={account_type} | IP={record.proxy_ip or "无"} | IP状态={ip_status}')
+            print(f'[单号刷新] {phone} 处理完成 | 状态={status_desc} | 账号类型={account_type} | IP={current_proxy or "无"} | IP状态={ip_status}')
             return JSONResponse(content={
                 'status': 'success',
-                'results': {phone: {'valid': valid, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': record.proxy_ip or '', 'ip_status': ip_status}}
+                'results': {phone: {'valid': valid, 'status_desc': status_desc, 'account_type': account_type, 'proxy_ip': current_proxy, 'ip_status': ip_status}}
             })
         else:
             return JSONResponse(content={
                 'status': 'success',
-                'results': {phone: {'valid': False, 'status_desc': 'never', 'account_type': '', 'proxy_ip': record.proxy_ip or '', 'ip_status': ip_status}}
+                'results': {phone: {'valid': False, 'status_desc': 'never', 'account_type': '', 'proxy_ip': current_proxy, 'ip_status': ip_status}}
             })
     except Exception as e:
         print(f'[单号刷新] {phone} 处理异常: {e}')
@@ -2972,57 +2441,50 @@ async def refresh_login_single(request: Request, user: User = Depends(get_curren
 
 
 # ===================== 查询中标结果 =====================
+
+async def _update_single_bid(rec, db: SQLSession) -> dict:
+    """查询单个账号抢购结果并更新 record。返回 {'is_win': bool, 'pay_status': str}"""
+    if not rec.logged_in or not rec.token:
+        return {'is_win': False, 'pay_status': rec.pay_status or ''}
+    try:
+        creds = build_credentials_from_db(rec.phone, db)
+        bridge_result = await _bridge._post('/api/bridge/execute', {
+            'method': 'query_order_list',
+            'params': {},
+            'credentials': creds
+        })
+        orders = bridge_result.get('result', []) if bridge_result.get('success') else []
+        winning = [o for o in orders if o.get("status") in (1, 2, 3)]
+        if winning:
+            rec.bid_result = f"中奖-{winning[0].get('itemName', '商品')}"
+            rec.balance = winning[0].get("totalAmount", "")
+            st = winning[0].get("status")
+            if st in (2, 3):
+                rec.pay_status = "success"; rec.balance = "已支付"
+                return {'is_win': True, 'pay_status': 'success'}
+            elif st == 1:
+                rec.pay_status = "pending"; rec.balance = "待支付"
+                return {'is_win': True, 'pay_status': 'pending'}
+            return {'is_win': True, 'pay_status': 'unknown'}
+        else:
+            rec.bid_result = "未中奖"
+            return {'is_win': False, 'pay_status': ''}
+    except Exception as e:
+        return {'is_win': False, 'pay_status': rec.pay_status or '', 'error': str(e)}
+
+
 @app.post("/api/query_bid_results")
 async def query_bid_results(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
     records = db.query(PhoneRecord).filter(PhoneRecord.user_id == user.id).all()
     results = {}
     for rec in records:
-        if not rec.logged_in or not rec.token:
-            results[rec.phone] = {"bid_result": rec.bid_result, "balance": rec.balance, "pay_url": rec.pay_url, "pay_status": rec.pay_status}
-            continue
-        try:
-            creds = build_credentials_from_db(rec.phone, db)
-            bridge_result = await _bridge._post('/api/bridge/execute', {
-                'method': 'query_order_list',
-                'params': {},
-                'credentials': creds
-            })
-            orders = bridge_result.get('result', []) if bridge_result.get('success') else []
-            winning = [o for o in orders if o.get("status") in (1, 2, 3)]
-            if winning:
-                rec.bid_result = f"中奖-{winning[0].get('itemName', '商品')}"
-                rec.balance = winning[0].get("totalAmount", "")
-                st = winning[0].get("status")
-                if st in (2, 3): rec.pay_status = "success"; rec.balance = "已支付"
-                elif st == 1: rec.pay_status = "pending"; rec.balance = "待支付"
-            else: rec.bid_result = "未中奖"
-            db.commit()
-        except: pass
+        await _update_single_bid(rec, db)
+        db.commit()
         results[rec.phone] = {"bid_result": rec.bid_result, "balance": rec.balance, "pay_url": rec.pay_url, "pay_status": rec.pay_status}
     return JSONResponse(content={'status': 'success', 'results': results})
 
 
 # ===================== 客户端 API =====================
-@app.get("/api/client/inventory_status")
-async def client_inventory_status(request: Request, db: SQLSession = Depends(get_db)):
-    """客户端专用库存状态端点（X-API-TOKEN 认证，无需 session 登录）"""
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN: raise HTTPException(status_code=403)
-    global stock_monitoring_active, is_stock_available
-    cfg = get_user_config(1, db)  # admin 的库存监控全局状态
-    db_monitoring = cfg.inventory_monitoring if cfg else 0
-    if db_monitoring == 1 and not stock_monitoring_active:
-        stock_monitoring_active = True
-    elif db_monitoring == 0 and stock_monitoring_active:
-        stock_monitoring_active = False
-    return JSONResponse(content={
-        'stock_monitoring_active': stock_monitoring_active,
-        'is_stock_available': is_stock_available,
-        'active_monitors_count': len(active_monitors),
-        'inventory_monitoring_db': db_monitoring,
-        'active_client_windows': get_active_client_count()
-    })
-
-
 @app.get("/api/client/get_config")
 async def client_get_config(request: Request, db: SQLSession = Depends(get_db)):
     if request.headers.get('X-API-TOKEN') != Config.API_TOKEN: raise HTTPException(status_code=403)
@@ -3417,58 +2879,6 @@ async def client_register_window(request: Request, db: SQLSession = Depends(get_
     })
 
 
-@app.post("/api/client/bind_device")
-async def client_bind_device(request: Request, db: SQLSession = Depends(get_db)):
-    """客户端上报手机号与设备机型的绑定关系（绑定后不可更换）"""
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403, detail="无权限")
-    data = await request.json()
-    phone = data.get('phone', '')
-    device_key = data.get('device_key', '')
-    if not phone or not device_key:
-        return JSONResponse(content={'status': 'error', 'message': '缺少phone或device_key'})
-
-    record = db.query(PhoneRecord).filter(PhoneRecord.phone == phone).first()
-    if not record:
-        return JSONResponse(content={'status': 'error', 'message': '手机号不存在'})
-
-    if record.device_key:
-        return JSONResponse(content={
-            'status': 'success', 'device_key': record.device_key,
-            'new_binding': False, 'message': f'已有绑定: {record.device_key}',
-        })
-
-    record.device_key = device_key
-    db.commit()
-    print(f'[设备绑定] {phone} → {device_key}')
-    return JSONResponse(content={
-        'status': 'success', 'device_key': device_key,
-        'new_binding': True, 'message': f'绑定成功: {device_key}',
-    })
-
-
-@app.get("/api/client/get_device_bindings")
-async def client_get_device_bindings(request: Request, db: SQLSession = Depends(get_db)):
-    """获取所有手机号的设备绑定关系"""
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403, detail="无权限")
-    uploader_id_str = request.query_params.get('uploader_id', '0')
-    try:
-        uploader_id = int(uploader_id_str)
-    except Exception:
-        uploader_id = 0
-
-    if uploader_id:
-        records = db.query(PhoneRecord).filter(
-            PhoneRecord.device_key != '', PhoneRecord.user_id == uploader_id).all()
-    else:
-        records = db.query(PhoneRecord).filter(PhoneRecord.device_key != '').all()
-
-    bindings = {r.phone: r.device_key for r in records}
-    print(f'[设备绑定] 查询返回 {len(bindings)} 条绑定 (uploader_id={uploader_id})')
-    return JSONResponse(content={'status': 'success', 'bindings': bindings, 'count': len(bindings)})
-
-
 async def client_register_legacy(request: Request, db: SQLSession):
     """旧版注册逻辑回退（无 device_key 时使用）"""
     # 直接调用原 client_register 逻辑
@@ -3651,13 +3061,10 @@ def allocate_tasks_for_window(white_records: list, multi_open_count: int, window
 
 
 def _build_task_response(records: list, db=None, uploader_id=0) -> list:
-    """构建任务响应列表。IP分配策略：手机代理(最优先) > 就绪池 > 原始池。
-    独立IP优先，IP不足时共享（最多3账号/IP）。
-    uploader_id: 用户ID，用于读取该用户的代理配置（开关+API地址）"""
-    # 读取代理配置
+    """构建任务响应列表。代理IP由客户端从服务端 /api/client/get_proxies 自行获取分配。"""
+    # 读取代理配置（仅用于判断是否需要代理）
     proxy_enabled = False
     proxy_api_url = ''
-    MAX_SHARE_PER_IP = 3  # 共享阈值：同一IP最多分配给几个账号
     if db and uploader_id:
         try:
             up = get_user_proxy(uploader_id, db)
@@ -3667,58 +3074,12 @@ def _build_task_response(records: list, db=None, uploader_id=0) -> list:
         except:
             pass
 
-    def _get_best_ip():
-        """获取最优IP，按代理模式控制来源
-        proxy_only: 仅外部代理（就绪池 > 原始池）
-        off:        不使用代理"""
-        if PHONE_PROXY_MODE == 'off':
-            return ''
-        # 外部代理（proxy_only）
-        if PHONE_PROXY_MODE == 'proxy_only':
-            ip = proxy_manager.get_ready_proxy()
-            if ip:
-                return ip
-            return proxy_manager.get_proxy(proxy_api_url)
-        return ''
+    _need_proxy = proxy_enabled or PHONE_PROXY_MODE == 'proxy_only'
 
     tasks = []
-    ip_usage_count = {}
-    _assigned_new = False
-
     for r in records:
-        proxy_ip = r.proxy_ip or ''
-
-        # 判断是否需要代理
-        _need_proxy = proxy_enabled or PHONE_PROXY_MODE == 'proxy_only'
-
-        # 自动分配代理：需要代理且该记录无代理IP时，从池中获取
-        if _need_proxy and not proxy_ip and proxy_api_url and db:
-            proxy_ip = _get_best_ip()
-            if proxy_ip:
-                r.proxy_ip = proxy_ip
-                _assigned_new = True
-                try:
-                    db.commit()
-                except:
-                    pass
-        elif _need_proxy and proxy_ip:
-            # 已有IP，检查是否超过共享阈值（同一IP给太多账号）
-            if ip_usage_count.get(proxy_ip, 0) + 1 > MAX_SHARE_PER_IP:
-                # 超过共享阈值，尝试分配独立IP（优先就绪池）
-                new_ip = _get_best_ip()
-                if new_ip and new_ip not in ip_usage_count:
-                    proxy_manager.return_proxy(proxy_ip)
-                    proxy_ip = new_ip
-                    r.proxy_ip = proxy_ip
-                    _assigned_new = True
-                    try:
-                        db.commit()
-                    except:
-                        pass
-                    print(f'[IP分配] {r.phone} IP超共享阈值({MAX_SHARE_PER_IP})，切换为: {new_ip}')
-
-        if proxy_ip:
-            ip_usage_count[proxy_ip] = ip_usage_count.get(proxy_ip, 0) + 1
+        # 代理IP不再从数据库读取，由客户端自行从服务端获取
+        proxy_ip = ''
 
         tasks.append({
             'phone': r.phone, 'token': r.token, 'cookie': r.cookie, 'user_id': r.user_id_ext,
@@ -3729,10 +3090,8 @@ def _build_task_response(records: list, db=None, uploader_id=0) -> list:
             'activity_id': r.activity_id, 'amount': r.amount, 'proxy_ip': proxy_ip,
         })
 
-    # 仅在新分配IP时打印汇总，纯查询（fetch_tasks轮询）不刷屏
-    if _assigned_new and _need_proxy and ip_usage_count:
-        ip_dist = ', '.join(f'{ip}(x{c})' for ip, c in sorted(ip_usage_count.items(), key=lambda x: -x[1])[:10])
-        print(f'[IP分配] 本轮分配完成: {len(tasks)}个账号, {len(ip_usage_count)}个IP | 就绪池: {proxy_manager.ready_pool_size()} | 分布: {ip_dist}')
+    if _need_proxy:
+        print(f'[任务分发] 本轮 {len(tasks)} 个账号 | 代理已开启(proxy_url={proxy_api_url[:50] if proxy_api_url else "未配置"})，客户端需自行调用 /api/client/get_proxies')
 
     return tasks
 
@@ -3756,9 +3115,8 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
         multi_open_count = cfg.multi_open_count or 1
         if uploader_id:
             # 自己的账号 + 所在团队分配的账号
-            from models import Team, TeamMember as TM, TeamAccount as TA
             member_team_ids = [
-                mt.team_id for mt in db.query(TM).filter(TM.user_id == uploader_id).all()
+                mt.team_id for mt in db.query(TeamMember).filter(TeamMember.user_id == uploader_id).all()
             ]
             # 自己上传的 team 也包含（owner 也是成员）
             owned_team_ids = [
@@ -3768,7 +3126,7 @@ async def client_get_tasks(request: Request, db: SQLSession = Depends(get_db)):
             # 所有团队的账号 phone 集合
             team_phones = set()
             if all_team_ids:
-                mappings = db.query(TA).filter(TA.team_id.in_(all_team_ids)).all()
+                mappings = db.query(TeamAccount).filter(TeamAccount.team_id.in_(all_team_ids)).all()
                 team_phones = {m.phone for m in mappings}
             # 查询：自己的 + 团队账号
             if team_phones:
@@ -3983,8 +3341,6 @@ async def client_heartbeat(request: Request):
     return JSONResponse(content={
         'status': 'success',
         'device_count': device_count,
-        'is_stock_available': is_stock_available,
-        'stock_monitoring_active': stock_monitoring_active,
         'server_restart_required': server_restart_req,
         'server_restart_version': server_restart_ver,
     })
@@ -4163,65 +3519,6 @@ async def client_active_windows(request: Request):
     })
 
 
-@app.get("/api/client/inventory_longpoll")
-async def client_inventory_longpoll(request: Request, db: SQLSession = Depends(get_db)):
-    """客户端长轮询端点 - 库存状态变更时毫秒级响应
-    客户端发送请求带上 last_status 参数，服务端挂起连接直到状态变更或超时
-    """
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN: raise HTTPException(status_code=403)
-    global stock_monitoring_active, is_stock_available
-    cfg = get_user_config(1, db)  # admin 的库存监控全局状态
-    db_monitoring = cfg.inventory_monitoring if cfg else 0
-    if db_monitoring == 1 and not stock_monitoring_active:
-        stock_monitoring_active = True
-    elif db_monitoring == 0 and stock_monitoring_active:
-        stock_monitoring_active = False
-
-    timeout_sec = min(float(request.query_params.get('timeout', '30')), 60)
-    last_status = request.query_params.get('last_status', 'unknown')
-
-    start_time = time.time()
-    while time.time() - start_time < timeout_sec:
-        # 计算当前状态
-        if is_stock_available:
-            current_status = 'available'
-        elif stock_monitoring_active:
-            current_status = 'monitoring'
-        else:
-            current_status = 'unknown'
-
-        # 状态发生变更，立即返回
-        if current_status != last_status:
-            return JSONResponse(content={
-                'stock_monitoring_active': stock_monitoring_active,
-                'is_stock_available': is_stock_available,
-                'active_monitors_count': len(active_monitors),
-                'inventory_monitoring_db': db_monitoring,
-                'active_client_windows': get_active_client_count(),
-                'status_changed': True,
-                'current_status': current_status
-            })
-        # 每200ms检查一次状态变更
-        await asyncio.sleep(0.2)
-
-    # 超时，返回当前状态
-    if is_stock_available:
-        current_status = 'available'
-    elif stock_monitoring_active:
-        current_status = 'monitoring'
-    else:
-        current_status = 'unknown'
-    return JSONResponse(content={
-        'stock_monitoring_active': stock_monitoring_active,
-        'is_stock_available': is_stock_available,
-        'active_monitors_count': len(active_monitors),
-        'inventory_monitoring_db': db_monitoring,
-        'active_client_windows': get_active_client_count(),
-        'status_changed': False,
-        'current_status': current_status
-    })
-
-
 @app.post("/api/import_accounts_from_json")
 async def api_import_accounts_from_json(user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
     """
@@ -4232,122 +3529,14 @@ async def api_import_accounts_from_json(user: User = Depends(get_current_user), 
     return JSONResponse(content={'status': 'success', 'message': f'导入完成: {total} 个账号（文件: {user.username}_accounts.json）'})
 
 
-@app.post("/api/client/request_replacement_tasks")
-async def client_request_replacement_tasks(request: Request, db: SQLSession = Depends(get_db)):
-    """客户端请求继续分配任务
-    新语义：成功几个就补几个白号，保持窗口始终满多开数个手机号
-    不限制同一账号多窗口使用"""
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN: raise HTTPException(status_code=403)
-    data = await request.json()
-    succeeded_phones = data.get('succeeded_phones', [])
-    client_uuid = data.get('client_uuid', '')
-    request_count = data.get('request_count', 1)  # 客户端指定请求几个新账号
-    uploader_id = data.get('uploader_id', 0)
-    
-    try:
-        if uploader_id:
-            cfg = get_user_config(uploader_id, db)
-        else:
-            cfg = get_user_config(1, db)
-        multi_open_count = cfg.multi_open_count or 1
-        multi_open_enabled = cfg.multi_open_enabled
-    except Exception as e:
-        print(f'[继续分配] 数据库异常: {e}')
-        return JSONResponse(content={'status': 'error', 'message': str(e)[:60], 'tasks': []})
-    
-    # 继续分配关闭时，返回空列表（客户端不再分配）
-    if not multi_open_enabled:
-        print(f'[继续分配] UUID={client_uuid}, 继续分配已关闭，不分配新账号')
-        return JSONResponse(content={'status': 'success', 'tasks': []})
-    
-    # 查找所有白号（未黑号、已登录），排除已成功的，按用户ID过滤
-    if uploader_id:
-        all_white = db.query(PhoneRecord).filter(
-            PhoneRecord.logged_in == True,
-            PhoneRecord.user_id == uploader_id,
-            ~PhoneRecord.bid_result.contains('成功')
-        ).all()
-    else:
-        all_white = db.query(PhoneRecord).filter(
-            PhoneRecord.logged_in == True,
-            ~PhoneRecord.bid_result.contains('成功')
-        ).all()
-    # 过滤黑号
-    all_white = [r for r in all_white if not _is_black_account(r.account_type)]
-    all_white = _filter_excluded(all_white, cfg)
-
-    # 过滤掉刚刚成功的号（这些号本窗口已经有了成功的记录）
-    available = [r for r in all_white if r.phone not in succeeded_phones]
-    
-    # 新语义：不限制同一账号多窗口使用，凑满 request_count 个
-    # 白号充足时取前 request_count 个；不足时循环复用
-    n = len(available)
-    if n == 0:
-        print(f'[继续分配] UUID={client_uuid} | 已成功={len(succeeded_phones)} | 无可分配白号（所有白号均已成功或为黑号）')
-        return JSONResponse(content={'status': 'success', 'tasks': []})
-    
-    assigned = []
-    for i in range(request_count):
-        assigned.append(available[i % n])
-    
-    print(f'[继续分配] UUID={client_uuid} | 已成功={len(succeeded_phones)} | 请求={request_count} | 可用白号={n} | 实际分配={len(assigned)}')
-    
-    return JSONResponse(content={'status': 'success', 'tasks': _build_task_response(assigned, db=db, uploader_id=uploader_id)})
-
-
-@app.post("/api/client/broadcast_rush_status")
-async def client_broadcast_rush_status(request: Request):
-    """客户端广播抢购状态变更：start_rush / stop_rush
-    服务端收到后更新库存广播状态，通知所有其他客户端"""
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN: raise HTTPException(status_code=403)
-    data = await request.json()
-    action = data.get('action', '')
-    global inventory_broadcast_status, is_stock_available
-    if action == 'start_rush':
-        is_stock_available = True
-        await broadcast_inventory_status('available')
-        print(f'[广播] 客户端触发：开始抢购')
-    elif action == 'stop_rush':
-        is_stock_available = False
-        await broadcast_inventory_status('soldout')
-        print(f'[广播] 客户端触发：停止抢购，回到库存监控')
-    return JSONResponse(content={'status': 'success', 'message': f'广播状态已更新: {action}'})
-
-
 @app.post("/api/client/report_result")
 async def client_report_result(request: Request, db: SQLSession = Depends(get_db)):
     if request.headers.get('X-API-TOKEN') != Config.API_TOKEN: raise HTTPException(status_code=403)
     data = await request.json()
     phone = data.get('phone'); success = data.get('success', False)
     order_id = data.get('order_id', ''); h5_url = data.get('h5_url', ''); error_msg = data.get('error', '')
-    ip_blocked = data.get('ip_blocked', False)  # 客户端上报IP被封
-    account_black = data.get('account_black', False)  # 客户端上报账号被黑
     record = db.query(PhoneRecord).filter(PhoneRecord.phone == phone).first()
     if not record: raise HTTPException(status_code=404, detail='手机号不存在')
-    
-    # 获取该账号所属用户的代理API地址
-    record_up = get_user_proxy(record.user_id or 1, db) if record.user_id else get_user_proxy(1, db)
-    proxy_api_url = record_up.proxy_url if record_up else ''
-    
-    # === 抢购过程IP被封处理：立即测试并更换IP ===
-    if ip_blocked and record.proxy_ip:
-        print(f'[抢购] {phone} IP被封 | 旧IP={record.proxy_ip}，丢弃换新IP')
-        proxy_manager.discard_proxy(record.proxy_ip)
-        uid = record.user_id or 1
-        new_proxy = await _test_and_assign_ip(uid, proxy_api_url, db)
-        record.proxy_ip = new_proxy
-        print(f'[抢购] {phone} 新IP: {new_proxy or "无可用IP"}')
-    
-    # === 账号被黑处理：立即下线，回收IP给其他账号用 ===
-    if account_black:
-        record.account_type = 'black'
-        record.logged_in = False
-        # 回收该黑号的代理IP，供其他白号复用
-        if record.proxy_ip:
-            proxy_manager.return_proxy(record.proxy_ip)
-            print(f'[抢购] {phone} 账号被黑，回收IP: {record.proxy_ip}')
-        record.proxy_ip = ''  # 清空绑定，让新账号分配时从池中取
-        print(f'[抢购] {phone} 账号被黑，立即下线')
     
     if success:
         record.bid_result = f"成功-订单{order_id}"; record.balance = "待支付"
@@ -4355,47 +3544,16 @@ async def client_report_result(request: Request, db: SQLSession = Depends(get_db
         record.pay_url_wechat = data.get('pay_url_wechat', '') or ''
         record.pay_url = data.get('pay_url_unionpay', '') or ''  # 云闪付/银联 → pay_url
         record.pay_status = '待支付'
-        if h5_url: qrcode.make(h5_url).save(os.path.join(QRCODE_FOLDER, f"{phone}.png"))
     else: record.bid_result = f"失败-{error_msg[:50]}"
     record.last_updated = datetime.datetime.utcnow(); db.commit()
-    return JSONResponse(content={'status': 'success', 'new_proxy_ip': record.proxy_ip})
+    return JSONResponse(content={'status': 'success'})
 
 
 # ===================== 客户端日志上传 =====================
 LOG_DIR_CLIENT = os.path.join(BASEDIR, 'client_logs')
 os.makedirs(LOG_DIR_CLIENT, exist_ok=True)
 
-CDN_LOG_DIR = os.path.join(BASEDIR, 'cdn_logs')
-os.makedirs(CDN_LOG_DIR, exist_ok=True)
 
-
-@app.post("/api/client/report_cdn_lock")
-async def client_report_cdn_lock(request: Request):
-    """接收客户端上报的CDN 4030锁定事件（一轮探测汇总），写入专用txt供分析"""
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403)
-    data = await request.json()
-    items = data.get('items', [])
-    client_time = data.get('client_time', '')
-    client_uuid = data.get('uuid', 'unknown')
-    batch = data.get('batch', 0)
-    date_str = datetime.datetime.now().strftime('%Y-%m-%d')
-    filename = f"cdn_{date_str}.txt"
-    filepath = os.path.join(CDN_LOG_DIR, filename)
-    if not items:
-        return JSONResponse(content={'status': 'empty'})
-    with open(filepath, 'a', encoding='utf-8') as f:
-        f.write(f"[{client_time}] batch={batch} uuid={client_uuid}\n")
-        for item in items:
-            phone = item.get('phone', '?')
-            mode = item.get('mode', '?')
-            http_status = item.get('http_status', 0)
-            code = item.get('code', '')
-            msg = item.get('msg', '')
-            srv_time = item.get('srv_time', '')
-            f.write(f"  {phone} | mode={mode} | http={http_status} | code={code} | msg={msg} | srv_time={srv_time}\n")
-        f.write('\n')
-    return JSONResponse(content={'status': 'success'})
 
 
 @app.post("/api/client/upload_log")
@@ -4431,26 +3589,6 @@ async def client_upload_log(request: Request):
 
 # ===================== 代理IP管理 API =====================
 
-@app.get("/api/proxy/pool_size")
-async def proxy_pool_size(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """获取代理池状态：池中可用IP数、已分配IP数、已淘汰IP数"""
-    pool_count = proxy_manager.pool_size()
-    # 统计数据库中已绑定IP的账号数
-    if user.username.lower() == 'admin':
-        bound_count = db.query(PhoneRecord).filter(PhoneRecord.proxy_ip != '').count()
-        total_accounts = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True).count()
-    else:
-        bound_count = db.query(PhoneRecord).filter(PhoneRecord.proxy_ip != '', PhoneRecord.user_id == user.id).count()
-        total_accounts = db.query(PhoneRecord).filter(PhoneRecord.logged_in == True, PhoneRecord.user_id == user.id).count()
-    discarded_count = len(proxy_manager.all_discarded())
-    return JSONResponse(content={
-        'pool_count': pool_count,
-        'bound_count': bound_count,
-        'discarded_count': discarded_count,
-        'total_accounts': total_accounts
-    })
-
-
 @app.post("/api/proxy/test")
 async def proxy_test_ip(request: Request, user: User = Depends(get_current_user)):
     """手动测试单个代理IP是否可用"""
@@ -4460,178 +3598,6 @@ async def proxy_test_ip(request: Request, user: User = Depends(get_current_user)
         return JSONResponse(content={'status': 'error', 'message': '缺少 proxy_url'})
     result = await _test_proxy_ip(proxy_url)
     return JSONResponse(content={'status': 'success', 'result': result})
-
-
-@app.post("/api/proxy/purge")
-async def proxy_purge_manual(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """手动触发代理IP净化（立即执行一次全量扫描）"""
-    print(f'[代理净化] 用户 {user.username} 手动触发净化')
-    await _purge_all_dead_ips(db)
-    return JSONResponse(content={'status': 'success', 'message': '代理净化完成'})
-
-
-@app.post("/api/proxy/replace")
-async def proxy_replace_for_account(request: Request, user: User = Depends(get_current_user), db: SQLSession = Depends(get_db)):
-    """为指定账号替换代理IP（自动测试新IP可用性）"""
-    data = await request.json()
-    phone = str(data.get('phone', '')).strip()
-    if not phone:
-        return JSONResponse(content={'status': 'error', 'message': '手机号不能为空'})
-    record = db.query(PhoneRecord).filter(PhoneRecord.phone == phone, PhoneRecord.user_id == user.id).first()
-    if not record:
-        return JSONResponse(content={'status': 'error', 'message': '账号不存在'})
-    # 丢弃旧IP
-    old_ip = record.proxy_ip
-    if old_ip:
-        proxy_manager.discard_proxy(old_ip)
-        print(f'[IP替换] {phone} 旧IP已丢弃: {old_ip}')
-    # 获取用户代理配置
-    up = get_user_proxy(user.id, db)
-    proxy_api_url = up.proxy_url if up else ''
-    if not proxy_api_url:
-        return JSONResponse(content={'status': 'error', 'message': '未配置代理API'})
-    # 分配并测试新IP
-    new_ip = await _test_and_assign_ip(user.id, proxy_api_url, db)
-    if new_ip:
-        record.proxy_ip = new_ip
-        db.commit()
-        return JSONResponse(content={'status': 'success', 'new_ip': new_ip, 'old_ip': old_ip})
-    else:
-        return JSONResponse(content={'status': 'error', 'message': '无可用代理IP，请检查代理池'})
-
-
-@app.post("/api/client/report_ip_blocked")
-async def client_report_ip_blocked(request: Request, db: SQLSession = Depends(get_db)):
-    """
-    客户端上报IP被封（抢购过程中）→ 立即淘汰并分配新IP
-    返回新IP地址供客户端即时切换
-    """
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403)
-    data = await request.json()
-    phone = data.get('phone', '')
-    blocked_ip = data.get('blocked_ip', '')
-    uploader_id = data.get('uploader_id', 0)
-
-    record = db.query(PhoneRecord).filter(PhoneRecord.phone == phone).first()
-    if not record:
-        return JSONResponse(content={'status': 'error', 'message': '账号不存在'})
-
-    # 丢弃被封IP
-    if blocked_ip:
-        proxy_manager.discard_proxy(blocked_ip)
-        print(f'[IP封禁] {phone} IP已淘汰: {blocked_ip}')
-
-    # 获取代理配置
-    uid = uploader_id or record.user_id or 1
-    up = get_user_proxy(uid, db)
-    proxy_api_url = up.proxy_url if up else ''
-
-    # 分配新IP（自动测试可用性）
-    new_ip = await _test_and_assign_ip(uid, proxy_api_url, db)
-    if new_ip:
-        record.proxy_ip = new_ip
-        db.commit()
-        print(f'[IP封禁] {phone} 新IP: {new_ip}')
-        return JSONResponse(content={'status': 'success', 'new_ip': new_ip})
-    else:
-        record.proxy_ip = ''
-        db.commit()
-        return JSONResponse(content={'status': 'error', 'message': '无可用IP'})
-
-
-@app.post("/api/client/urgent_replace")
-async def client_urgent_replace(request: Request, db: SQLSession = Depends(get_db)):
-    """
-    4秒抢购窗口内的紧急黑号替换端点 — 极速返回一个白号
-
-    客户端在抢购窗口中发现黑号时调用此端点：
-    1. 即时标记该账号为黑号
-    2. 不等待DB flush，立即返回一个可用白号
-
-    超时策略：如果2秒内DB无响应，返回空（客户端不等待，继续抢购）
-    """
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403)
-    data = await request.json()
-    black_phone = data.get('black_phone', '')
-    uploader_id = data.get('uploader_id', 0)
-    client_uuid = data.get('client_uuid', '')
-
-    # 1. 异步标记黑号（不阻塞响应）
-    if black_phone:
-        try:
-            rec = db.query(PhoneRecord).filter(PhoneRecord.phone == black_phone).first()
-            if rec:
-                rec.account_type = 'black'
-                rec.logged_in = False
-                db.commit()
-        except Exception:
-            db.rollback()
-
-    # 2. 极速查找一个白号
-    uid = uploader_id or 1
-    cfg = get_user_config(uid, db)
-    try:
-        # 先用缓存回退
-        actual_uid = uid
-        white = db.query(PhoneRecord).filter(
-            PhoneRecord.logged_in == True,
-            PhoneRecord.user_id == actual_uid
-        ).all()
-        white = [r for r in white if not _is_black_account(r.account_type)]
-        white = _filter_excluded(white, cfg)
-
-        if white:
-            r = white[0]
-            tasks = _build_task_response([r], db=db, uploader_id=uid)
-            return JSONResponse(content={
-                'status': 'success',
-                'task': tasks[0] if tasks else {}
-            })
-    except Exception as e:
-        print(f'[紧急替换] 查询异常: {e}')
-
-    return JSONResponse(content={'status': 'empty', 'task': None})
-
-
-@app.post("/api/client/report_inventory")
-async def client_report_inventory(request: Request):
-    """
-    客户端上报库存发现
-    服务端接收后立即更新库存状态，并通过树状广播通知所有其他客户端
-    """
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403)
-    data = await request.json()
-    phone = data.get('phone', 'unknown')
-    item_code = data.get('item_code', '')
-    available = data.get('available', 0)
-    print(f'[库存报告] 客户端 {phone} 上报库存 | 商品={item_code} | 可用={available}')
-    global inventory_broadcast_status, is_stock_available
-    if available > 0:
-        is_stock_available = True
-        await broadcast_inventory_status('available')
-    else:
-        is_stock_available = False
-        await broadcast_inventory_status('soldout')
-    return JSONResponse(content={'status': 'success', 'message': '库存状态已更新'})
-
-
-@app.post("/api/client/broadcast_receive")
-async def client_broadcast_receive(request: Request):
-    """
-    客户端接收广播的确认端点
-    服务端树状广播时调用此端点通知客户端库存状态变更
-    """
-    if request.headers.get('X-API-TOKEN') != Config.API_TOKEN:
-        raise HTTPException(status_code=403)
-    data = await request.json()
-    status = data.get('status', 'unknown')
-    msg_type = data.get('type', '')
-    client_id = request.client.host if request.client else 'unknown'
-    print(f'[广播] 客户端 {client_id} 确认收到通知 | 类型={msg_type} | 状态={status}')
-    return JSONResponse(content={'status': 'success', 'message': '广播已确认'})
 
 
 # ===================== 客户端打包下载 API =====================
@@ -4986,43 +3952,17 @@ async def team_refresh_bid(team: Team = Depends(get_current_team), db: SQLSessio
     unpaid = 0
     results = {}
     for rec in records:
-        if not rec.logged_in or not rec.token:
-            results[rec.phone] = {'bid_result': rec.bid_result or '', 'balance': rec.balance or '',
-                                   'pay_url': rec.pay_url or '', 'pay_url_wechat': rec.pay_url_wechat or '',
-                                   'pay_url_alipay': rec.pay_url_alipay or '', 'pay_status': rec.pay_status or ''}
-            continue
-        try:
-            creds = build_credentials_from_db(rec.phone, db)
-            bridge_result = await _bridge._post('/api/bridge/execute', {
-                'method': 'query_order_list',
-                'params': {},
-                'credentials': creds
-            })
-            orders = bridge_result.get('result', []) if bridge_result.get('success') else []
-            winning = [o for o in orders if o.get("status") in (1, 2, 3)]
-            if winning:
-                rec.bid_result = f"中奖-{winning[0].get('itemName', '商品')}"
-                rec.balance = winning[0].get("totalAmount", "")
-                st = winning[0].get("status")
-                if st in (2, 3):
-                    rec.pay_status = "success"
-                    rec.balance = "已支付"
-                    paid_success += 1
-                elif st == 1:
-                    rec.pay_status = "pending"
-                    rec.balance = "待支付"
-                    unpaid += 1
-                bid_success += 1
-            else:
-                rec.bid_result = "未中奖"
-            rec.last_updated = datetime.datetime.utcnow()
-            results[rec.phone] = {'bid_result': rec.bid_result, 'balance': rec.balance,
-                                   'pay_url': rec.pay_url or '', 'pay_url_wechat': rec.pay_url_wechat or '',
-                                   'pay_url_alipay': rec.pay_url_alipay or '', 'pay_status': rec.pay_status or ''}
-        except Exception as e:
-            results[rec.phone] = {'bid_result': rec.bid_result or '', 'balance': rec.balance or '',
-                                   'pay_url': rec.pay_url or '', 'pay_url_wechat': rec.pay_url_wechat or '',
-                                   'pay_url_alipay': rec.pay_url_alipay or '', 'pay_status': rec.pay_status or ''}
+        info = await _update_single_bid(rec, db)
+        rec.last_updated = datetime.datetime.utcnow()
+        if info.get('is_win'):
+            bid_success += 1
+            if info.get('pay_status') == 'success':
+                paid_success += 1
+            elif info.get('pay_status') == 'pending':
+                unpaid += 1
+        results[rec.phone] = {'bid_result': rec.bid_result or '', 'balance': rec.balance or '',
+                               'pay_url': rec.pay_url or '', 'pay_url_wechat': rec.pay_url_wechat or '',
+                               'pay_url_alipay': rec.pay_url_alipay or '', 'pay_status': rec.pay_status or ''}
     db.commit()
     return JSONResponse(content={
         'status': 'success', 'message': f'刷新完成：抢购成功 {bid_success}，已付款 {paid_success}，待付款 {unpaid}',
@@ -5260,9 +4200,39 @@ async def admin_users(request: Request, user: User = Depends(get_current_user), 
 
 
 # ===================== 主入口 =====================
+# ===================== 注册外部路由模块（延迟到文件末尾注册，避免循环导入）=====================
+from routes.api_app import router as api_app_router
+app.include_router(api_app_router)
+
+from routes.api_teams import router as api_teams_router
+app.include_router(api_teams_router)
+
+from routes.api_bridge import router as api_bridge_router
+app.include_router(api_bridge_router)
+
+from routes.api_client import router as api_client_router
+app.include_router(api_client_router)
+
+
 if __name__ == '__main__':
     import uvicorn
     import socket
+    # ========== 启动前端口占用检测 ==========
+    _check_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _check_sock.bind(('0.0.0.0', Config.PORT))
+        _check_sock.close()
+    except OSError as _e:
+        _check_sock.close()
+        print(f"\n{'!'*50}")
+        print(f" 端口 {Config.PORT} 已被占用，无法启动！")
+        print(f" 错误: {_e}")
+        print(f" 请先关闭占用端口的进程，或修改 Config.PORT")
+        print(f" 查看占用进程: netstat -ano | findstr :{Config.PORT}")
+        print(f"{'!'*50}\n")
+        sys.stderr.write(f"Port {Config.PORT} already in use: {_e}\n")
+        sys.exit(1)
+    # ==========================================
     def get_local_ip():
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -5275,6 +4245,7 @@ if __name__ == '__main__':
     print(f" 内网访问: http://{'ipla.top'}:{Config.PORT}")
     print(f" 文档地址: http://127.0.0.1:{Config.PORT}/docs")
     print(f"{'='*50}\n")
+    sys.stdout.flush()  # 确保启动横幅立即输出，不被缓冲
     # 打印代理模式
     mode_desc = {'proxy_only': '外部代理', 'off': '关闭'}
     print(f"  代理模式: {mode_desc.get(PHONE_PROXY_MODE, PHONE_PROXY_MODE)} (PHONE_PROXY_MODE={PHONE_PROXY_MODE})\n")

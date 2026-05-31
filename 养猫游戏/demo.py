@@ -768,7 +768,7 @@ FlVGXjnuLs+FI2hg4QIDAQAB
 # ==================== 主流程 ====================
 
 def _load_accounts(accounts_path: str) -> list:
-    """从 iplala_accounts.json 加载账号列表"""
+    """从 accounts.json 加载账号列表"""
     import os
     if not os.path.exists(accounts_path):
         return []
@@ -776,12 +776,12 @@ def _load_accounts(accounts_path: str) -> list:
         with open(accounts_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"[账号] 读取 iplala_accounts.json 失败: {e}")
+        print(f"[账号] 读取 accounts.json 失败: {e}")
         return []
 
 
 def _save_account(accounts_path: str, mobile: str, client) -> None:
-    """登录成功后保存/更新账号到 iplala_accounts.json"""
+    """登录成功后保存/更新账号到 accounts.json"""
     accounts = _load_accounts(accounts_path)
     record = {
         "mobile": mobile,
@@ -803,10 +803,10 @@ def _save_account(accounts_path: str, mobile: str, client) -> None:
     idx = next((i for i, u in enumerate(accounts) if u.get("mobile") == mobile), -1)
     if idx >= 0:
         accounts[idx] = {**accounts[idx], **record}
-        print(f"\n💾 已更新账号 {mobile} 到 iplala_accounts.json")
+        print(f"\n💾 已更新账号 {mobile} 到 accounts.json")
     else:
         accounts.append(record)
-        print(f"\n💾 已保存账号 {mobile} 到 iplala_accounts.json")
+        print(f"\n💾 已保存账号 {mobile} 到 accounts.json")
     with open(accounts_path, 'w', encoding='utf-8') as f:
         json.dump(accounts, f, ensure_ascii=False, indent=2)
 
@@ -830,8 +830,7 @@ def _load_account_to_client(acc: dict, client) -> None:
 
 if __name__ == "__main__":
     import os
-    from app import secure_filename
-    import app
+
     accounts_path = os.path.join(os.path.dirname(__file__), 'accounts.json')
     accounts = _load_accounts(accounts_path)
     client = None
@@ -857,7 +856,6 @@ if __name__ == "__main__":
 
     # 2. 需要重新登录
     if not client:
-        from app import api_send_code
         client = MoutaiClient()
         print("=" * 50)
         print(f"Device-ID:  {client.mt_device_id}")
@@ -933,9 +931,6 @@ if __name__ == "__main__":
     # if compose_result.get("code") != 2000:
     #     print(f"\n组单失败: {compose_result}")
     #     exit(0)
-
-    # 先定义地址变量（空地址示例，你 later 可以改成真实地址）
-    selected_addr = ""  # 这里是空字符串，不影响运行
 
     submit_result = client.submit_order(
         spu_id=item_code, count=count, priority_record_id=record_id, address=selected_addr,
