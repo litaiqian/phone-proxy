@@ -21,7 +21,6 @@ from routes import get_db, get_current_user  # noqa: E402
 from moutai_automation import User, PhoneRecord, UPLOAD_FOLDER, BASEDIR, Config  # noqa: E402
 
 from demo import MoutaiClient, generate_h5_did, generate_h5_start_id, generate_bs_device_id  # noqa: E402
-from moutai_automation import save_account_to_json  # noqa: E402
 
 
 def build_client_from_record(phone: str, db: Session) -> MoutaiClient:
@@ -206,7 +205,6 @@ async def api_submit_code(request: Request, user: User = Depends(get_current_use
         record.last_updated = datetime.datetime.utcnow()
         record.login_time = datetime.datetime.now()
         db.commit()
-        save_account_to_json(phone, client)
         return JSONResponse(content={'status': 'success', 'message': '登录成功'})
     return JSONResponse(content={'status': 'error',
                                   'message': f'登录失败: {result.get("message")}'}, status_code=400)
@@ -241,7 +239,6 @@ async def receive_sms(request: Request, db: Session = Depends(get_db)):
         record.last_updated = datetime.datetime.utcnow()
         record.login_time = datetime.datetime.now()
         db.commit()
-        save_account_to_json(phone, client)
         return JSONResponse(content={'status': 'success', 'message': '自动登录成功'})
     return JSONResponse(content={'status': 'error',
                                   'message': f'登录失败: {result.get("message")}'}, status_code=400)

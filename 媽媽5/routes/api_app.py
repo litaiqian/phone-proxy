@@ -239,7 +239,6 @@ async def app_bind_account(
         return JSONResponse(content={'ok': False, 'error': '该手机号已被其他用户绑定'})
 
     from routes.web_bind import build_client_from_record
-    from moutai_automation import save_account_to_json
     from moutai_automation import BASEDIR
     import datetime as dt
 
@@ -278,7 +277,6 @@ async def app_bind_account(
         record.last_updated = dt.datetime.utcnow()
         record.login_time = dt.datetime.now()
         db.commit()
-        save_account_to_json(phone, client)
         return JSONResponse(content={'ok': True, 'message': '绑定成功'})
     else:
         return JSONResponse(content={
@@ -383,9 +381,9 @@ async def app_refresh_bind_login(
     user: User = Depends(get_app_user),
     db: Session = Depends(get_db),
 ):
-    """触发服务端重新检测所有绑定账号的登录状态"""
-    import asyncio, random, os, json
-    from demo import MoutaiClient, _get, _load_accounts, _load_account_to_client, BASE_URL
+    """触发服务端重新检测所有绑定账号的登录状态（仅使用远程数据库）"""
+    import asyncio, random
+    from moutai_automation import build_credentials_from_db, check_login_validity_async, update_login_status
 
     records = (
         db.query(PhoneRecord)
@@ -393,46 +391,21 @@ async def app_refresh_bind_login(
         .all()
     )
 
-    accounts_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'iplala_accounts.json',
-    )
-    try:
-        accounts = _load_accounts(accounts_file)
-    except Exception:
-        accounts = []
-
     for i, record in enumerate(records):
         if i > 0:
             await asyncio.sleep(random.uniform(0.05, 0.3))
         try:
-            acc = next(
-                (a for a in accounts if a.get("mobile") == record.phone), None
-            )
-            if not acc:
+            has_db_data = record and bool(record.token)
+            if not has_db_data:
                 record.logged_in = False
                 record.last_updated = datetime.datetime.utcnow()
                 db.commit()
                 continue
 
-            client = MoutaiClient(bs_dvid=acc.get('bs-dvid', ''))
-            _load_account_to_client(acc, client)
-            headers = client._app_headers(need_sign=False)
-            resp = _get(
-                f"{BASE_URL}/xhr/front/user/info",
-                headers=headers,
-                proxy='',
-            )
-            data = resp.json()
-            if data.get("code") == 2000:
-                record.logged_in = True
-                record.token = acc.get('token', '')
-                record.cookie = acc.get('cookie', '')
-                record.user_id_ext = acc.get('userid', '')
-                record.last_updated = datetime.datetime.utcnow()
-            else:
-                record.logged_in = False
-                record.last_updated = datetime.datetime.utcnow()
+            valid = await check_login_validity_async(record.phone)
+            if valid is None:
+                continue  # 桥接不可达，保留原状态
+            update_login_status(record.phone, valid, db)
             db.commit()
         except Exception:
             record.logged_in = False

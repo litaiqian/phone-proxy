@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session
 router = APIRouter(tags=["杂项"])
 
 from routes import get_db, get_current_user  # noqa: E402
-from moutai_automation import User, PhoneRecord, get_user_config, get_user_proxy, Config, BASEDIR  # noqa: E402
-from demo import MoutaiClient, _get, _load_accounts, _load_account_to_client, BASE_URL  # noqa: E402
+from moutai_automation import User, PhoneRecord, get_user_config, get_user_proxy, Config, BASEDIR, build_credentials_from_db, check_login_validity_async, update_login_status, _get_login_status_desc  # noqa: E402
+from demo import MoutaiClient  # noqa: E402
 from demo import generate_h5_did, generate_h5_start_id, generate_bs_device_id  # noqa: E402
 
 

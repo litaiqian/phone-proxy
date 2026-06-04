@@ -17,7 +17,6 @@ from moutai_automation import User, PhoneRecord, SessionLocal, BASEDIR  # noqa: 
 
 # 从 demo.py 导入
 from demo import MoutaiClient  # noqa: E402
-from moutai_automation import save_account_to_json  # noqa: E402
 
 
 def build_client_from_record(phone: str, db: Session) -> MoutaiClient:
@@ -157,7 +156,6 @@ async def bind_account_submit_code(request: Request, db: Session = Depends(get_d
         record.last_updated = datetime.datetime.utcnow()
         record.login_time = datetime.datetime.now()
         db.commit()
-        save_account_to_json(phone, client)
 
         account_type_msg = ''
         try:

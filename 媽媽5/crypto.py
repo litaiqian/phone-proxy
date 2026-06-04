@@ -28,6 +28,7 @@ import random
 import string
 import struct
 import os
+import threading
 import uuid as _uuid
 from typing import Dict, Any, List, Tuple, Optional, Union
 
@@ -905,6 +906,7 @@ _wasm_engine = None
 _wasm_store = None
 _wasm_instance = None
 _sign_wasm_bytes = None
+_wasm_lock = None  # threading.Lock (懒初始化，避免全局导入在非主线程阻塞)
 
 
 def _wasm_read_cstring(store, instance, ptr):
@@ -1046,7 +1048,19 @@ def generate_wasm_sign(did: str, sign: str, sign_wasm: bytes = None) -> Optional
     返回:
         成功: JSON 字符串 '{"uuid":"...","body":"...","has_env":0}'
         失败: None
+
+    线程安全: wasmtime.Store 不支持并发访问，所有 WASM 调用必须串行化
     """
+    global _wasm_lock
+    if _wasm_lock is None:
+        import threading
+        _wasm_lock = threading.Lock()
+
+    with _wasm_lock:
+        return _generate_wasm_sign_impl(did, sign, sign_wasm)
+
+
+def _generate_wasm_sign_impl(did: str, sign: str, sign_wasm: bytes = None) -> Optional[str]:
     if not _init_wasm():
         return None
 

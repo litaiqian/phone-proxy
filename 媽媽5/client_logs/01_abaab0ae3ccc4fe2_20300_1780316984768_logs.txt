@@ -1,0 +1,11 @@
+=== 抢购开始 round=20300_1780316984768 time=20:30:00.015 ===
+[13594265417] [抢购参数] itemCode(路由兜底)=IMTP1000313 actId=85140 skuId=741 频率=1ms 次数=1
+[13594265417] [目标站请求头] APP=1.9.7 | MT-V=052487b9d0e7768a265a6d2604j | Web-Bb=9988aa89ab9a98ba9bbaa898aa9aa8b845edb0cf | Referer=https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2 | Cookie=MT-Token-Wap=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOi
+[13594265417] [目标站URL] POST https://h5.moutai519.com.cn/xhr/front/trade/priority/rushPurchase/hot/branch/one
+[13594265417] [目标站actParam明文] {"amount":"6","itemCode":"741","itemPriorityActId":"85140","userInfoBaseContext":{"addressLat":"","addressLng":"","appUserAgent":"android;14;Xiaomi;shennong","deviceId":"clips_exoiEnRDcRMnFCYXIht5GCsdfhorEioafh14","mtr":"clips_OlU6TmFRag5rCXwbNAQ\/Tz1SKlN8THcecBp\/HGhHdw=="},"ydLogId":"","ydToken":""}
+[13594265417] [目标站请求体] {"actParam":"salGYFt5S6bQg3QmZ92dY6bsH+8CAJ0R8kZwwurslmXbTh0epueTLDQriQRinhZluJDyHCGOJi2pqULj8tJpij3EFNlluxgnThJJYftcn4EBgddhGCzm1fJ54uPEyr\/MDHjNItCv0b5CUQgelAS9WVNr7Ju165uiWJqpyVe7xbPZuBzn8BGJAeOBS6
+[13594265417] [目标站响应] #1 HTTP=429 code=429 msg=2
+ 543ms | body=2
+
+抢购完成 | 耗时=8736ms | 成功=0/1 | 429=是
+  13594265417: ❌ rush | 已达最大次数(1)

@@ -23,7 +23,7 @@ async def get_config_api(user: User = Depends(get_current_user), db: Session = D
         'rush_hour': cfg.rush_hour, 'rush_minute': cfg.rush_minute,
         'rush_second': cfg.rush_second, 'rush_millisecond': getattr(cfg, 'rush_millisecond', 0),
         'multi_open_count': cfg.multi_open_count,
-        'multi_open_enabled': cfg.multi_open_enabled, 'task_frequency': cfg.task_frequency,
+        'task_frequency': cfg.task_frequency,
         'rush_attempts': cfg.rush_attempts,
         'rush_count': getattr(cfg, 'rush_count', 100),
         'rush_paused': getattr(cfg, 'rush_paused', 0),
@@ -34,6 +34,9 @@ async def get_config_api(user: User = Depends(get_current_user), db: Session = D
         'phone_multi_open_count': getattr(cfg, 'phone_multi_open_count', 3),
         'phone_rush_enabled': getattr(cfg, 'phone_rush_enabled', 0),
         'rush_mode': getattr(cfg, 'rush_mode', 0),
+        'ips_per_account': getattr(cfg, 'ips_per_account', 1),
+        'async_rush': getattr(cfg, 'async_rush', False) or False,
+        'phone_proxy_enabled': getattr(cfg, 'phone_proxy_enabled', False) or False,
     })
 
 
@@ -51,10 +54,8 @@ async def set_config_api(request: Request, user: User = Depends(get_current_user
         cfg.multi_open_count = int(data['multi_open_count'])
     elif 'task_window_count' in data:
         cfg.multi_open_count = int(data['task_window_count'])
-    if 'multi_open_enabled' in data:
-        cfg.multi_open_enabled = bool(data['multi_open_enabled'])
-    elif 'distribution_mode' in data:
-        cfg.multi_open_enabled = bool(data['distribution_mode'])
+    if 'phone_proxy_enabled' in data:
+        cfg.phone_proxy_enabled = bool(data['phone_proxy_enabled'])
     if 'rush_attempts' in data:
         cfg.rush_attempts = int(data['rush_attempts'])
     if 'rush_count' in data:
@@ -75,6 +76,10 @@ async def set_config_api(request: Request, user: User = Depends(get_current_user
         cfg.phone_rush_enabled = int(data['phone_rush_enabled'])
     if 'rush_mode' in data:
         cfg.rush_mode = int(data['rush_mode'])
+    if 'ips_per_account' in data:
+        cfg.ips_per_account = int(data['ips_per_account'])
+    if 'async_rush' in data:
+        cfg.async_rush = bool(data['async_rush'])
     if 'anti_ban_proxy_enabled' in data:
         up.proxy_enabled = bool(data['anti_ban_proxy_enabled'])
     if 'anti_ban_proxy_url' in data:

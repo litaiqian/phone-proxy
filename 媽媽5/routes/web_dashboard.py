@@ -118,7 +118,7 @@ async def stats(request: Request, user: User = Depends(get_current_user), db: Se
     return JSONResponse(content={
         'total': total, 'success_login': success_login, 'offline': offline,
         'never_login': never_login, 'bid_success': bid_success,
-        'multi_open_count': cfg.multi_open_count, 'multi_open_enabled': cfg.multi_open_enabled,
+        'multi_open_count': cfg.multi_open_count, 'phone_proxy_enabled': getattr(cfg, 'phone_proxy_enabled', False) or False,
         'active_client_windows': active_client_windows, 'logged_in_count': logged_in_count,
         'total_windows': total_windows, 'white_count': white_count, 'black_count': black_count,
         'phone_multi_open_count': getattr(cfg, 'phone_multi_open_count', 3),

@@ -105,6 +105,14 @@
                         <label class="form-check-label fw-bold" for="intervalModeSwitch" style="font-size:0.85rem;">⏱️ 每5分钟间隔</label>
                     </div>
                 </div>
+                <!-- 异步抢购开关 -->
+                <div class="col-auto">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="asyncRushSwitch" onchange="saveAsyncRush(this.checked)">
+                        <label class="form-check-label fw-bold" for="asyncRushSwitch" style="font-size:0.85rem;">⚡ 异步抢购</label>
+                        <small class="text-muted d-block" style="font-size:0.7rem;line-height:1.1;">开=每IP独立并发抢购<br>关=IP轮询顺序抢购</small>
+                    </div>
+                </div>
                 <!-- 抢购时间 -->
                 <div class="col-auto">
                     <div class="input-group input-group-sm">
@@ -139,16 +147,20 @@
                             <input type="number" id="clientWindows" class="form-control" value="10" min="1" max="50" style="width: 60px; flex: none;" onchange="saveConfig({client_windows: parseInt(this.value)})">
                         </div>
                         <div class="input-group input-group-sm" style="width: auto;">
-                            <span class="input-group-text">多开数</span>
+                            <span class="input-group-text">PC多开数</span>
                             <input type="number" id="taskWindowCount" class="form-control" value="1" min="1" max="10" style="width: 60px; flex: none;" onchange="saveConfig({multi_open_count: parseInt(this.value)})">
                         </div>
                         <div class="input-group input-group-sm" style="width: auto;">
                             <span class="input-group-text">📱 手机多开</span>
                             <input type="number" id="phoneMultiOpenCount" class="form-control" value="3" min="1" max="50" style="width: 60px; flex: none;" onchange="saveConfig({phone_multi_open_count: parseInt(this.value)})">
                         </div>
+                        <div class="input-group input-group-sm" style="width: auto;">
+                            <span class="input-group-text">🌐 每号IP数</span>
+                            <input type="number" id="ipsPerAccount" class="form-control" value="1" min="1" max="10" style="width: 60px; flex: none;" onchange="saveConfig({ips_per_account: parseInt(this.value)})">
+                        </div>
                         <div class="form-check form-switch mb-0">
-                            <input class="form-check-input" type="checkbox" id="distributionModeSwitch" onchange="saveDistributionMode(this.checked)">
-                            <label class="form-check-label fw-bold" style="font-size:0.8rem;">继续分配</label>
+                            <input class="form-check-input" type="checkbox" id="phoneProxySwitch" onchange="savePhoneProxy(this.checked)">
+                            <label class="form-check-label fw-bold" style="font-size:0.8rem;">📱 手机代理IP</label>
                         </div>
                     </div>
                 </div>
@@ -502,8 +514,11 @@ function loadGlobalConfig() {
             if (cfg.phone_multi_open_count !== undefined) {
                 document.getElementById('phoneMultiOpenCount').value = cfg.phone_multi_open_count;
             }
-            if (cfg.multi_open_enabled !== undefined) {
-                document.getElementById('distributionModeSwitch').checked = cfg.multi_open_enabled;
+            if (cfg.ips_per_account !== undefined && document.getElementById('ipsPerAccount')) {
+                document.getElementById('ipsPerAccount').value = cfg.ips_per_account;
+            }
+            if (cfg.phone_proxy_enabled !== undefined) {
+                document.getElementById('phoneProxySwitch').checked = cfg.phone_proxy_enabled;
             }
             if (cfg.rush_attempts !== undefined) {
                 document.getElementById('rushAttempts').value = cfg.rush_attempts;
@@ -531,6 +546,10 @@ function loadGlobalConfig() {
                 document.getElementById('intervalModeSwitch').checked = cfg.interval_mode === 1;
                 updateIntervalModeLabel(cfg.interval_mode === 1);
             }
+            if (cfg.async_rush !== undefined) {
+                document.getElementById('asyncRushSwitch').checked = cfg.async_rush;
+                updateAsyncRushLabel(cfg.async_rush);
+            }
             if (cfg.phone_rush_enabled !== undefined) {
                 document.getElementById('phoneRushSwitch').checked = cfg.phone_rush_enabled === 1;
                 updatePhoneRushLabel(cfg.phone_rush_enabled === 1);
@@ -554,19 +573,23 @@ function saveConfig(data) {
     }).then(res => res.json()).then(result => {
         if (result.status === 'success') {
             showToast('配置已保存');
+        } else {
+            showToast('保存失败: ' + (result.message || '未知错误'), 'error');
         }
+    }).catch(err => {
+        showToast('保存失败（网络错误）', 'error');
     });
 }
 
-// 继续分配开关自动保存
-function saveDistributionMode(enabled) {
+// 手机代理IP开关自动保存
+function savePhoneProxy(enabled) {
     fetch('/api/set_config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ multi_open_enabled: enabled })
+        body: JSON.stringify({ phone_proxy_enabled: enabled })
     }).then(res => res.json()).then(result => {
         if (result.status === 'success') {
-            showToast(enabled ? '继续分配已开启' : '继续分配已关闭');
+            showToast(enabled ? '📱 手机代理IP已开启 → 每号分配IP' : '📱 手机代理IP已关闭 → 直连模式');
         }
     });
 }
@@ -668,6 +691,31 @@ function updateIntervalModeLabel(enabled) {
     } else {
         label.style.color = '#6c757d';  // 灰色
         label.style.fontWeight = 'bold';
+    }
+}
+
+// ===== 异步抢购开关 =====
+function saveAsyncRush(enabled) {
+    fetch('/api/set_config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({async_rush: enabled})
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'success') {
+            updateAsyncRushLabel(enabled);
+            showToast(enabled ? '异步抢购已开启：每个IP独立并发抢购' : '异步抢购已关闭：IP轮询顺序抢购');
+        }
+    }).catch(err => {
+        showToast('保存失败，请重试', 'error');
+        document.getElementById('asyncRushSwitch').checked = !enabled;
+    });
+}
+
+function updateAsyncRushLabel(enabled) {
+    const sw = document.getElementById('asyncRushSwitch');
+    const label = document.querySelector('label[for="asyncRushSwitch"]');
+    if (label) {
+        label.style.color = enabled ? '#0d6efd' : '#6c757d';
     }
 }
 

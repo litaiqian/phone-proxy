@@ -13,7 +13,6 @@ import json
 import base64
 import re
 import struct
-from asyncio import timeout
 from datetime import datetime
 from urllib.parse import quote
 from curl_cffi import requests as cffi_requests
@@ -283,6 +282,11 @@ class MoutaiClient:
         # 手机号 (由调用方设置，用于日志标识)
         self.phone = ""
 
+        # 自适应时间同步状态 (EWMA 收敛)
+        self._time_offset = 0.0        # 当前最优偏差估计
+        self._time_offset_count = 0    # 累计同步次数
+        self._time_offset_var = 0.0    # 近期测量方差
+
     # ==================== 请求头构建 ====================
 
     def _app_headers(self, need_sign: bool = False) -> dict:
@@ -513,42 +517,98 @@ class MoutaiClient:
 
     def sync_server_time(self) -> float:
         """
-        同步茅台服务器时间，返回 本地时间 - 服务器时间 的偏差(秒)
+        自适应时间同步：多次采样 + EWMA 收敛 → 偏差逼近 0
 
-        通过请求 resource/get 获取 Date 响应头
-        GET static.moutai519.com.cn/mt-backend/xhr/front/mall/resource/get
+        核心策略：
+        1. 每轮 5 次 CDN 采样，按 RTT 排序取前 3 快
+        2. 快样本 EWMA：RTT 越接近最快值，置信度越高，权重越大
+        3. 跨轮 EWMA：合并历史估计，α 随采样次数递减（收敛）
+           - 第 1 次: α=0.8 (激进学习)
+           - 第 10 次: α=0.3 (稳定跟踪)
+           - 第 50 次: α=0.1 (锁定)
+
+        GET h5.moutai519.com.cn/xhr/front/mall/resource/get (与抢购同一CDN节点，延迟测量准确)
 
         返回: offset > 0 表示本地比服务器快；< 0 表示本地比服务器慢
         """
         from email.utils import parsedate_to_datetime
-        url = f"https://static.moutai519.com.cn/mt-backend/xhr/front/mall/resource/get"
+        url = f"https://h5.moutai519.com.cn/xhr/front/mall/resource/get"
         headers = {"User-Agent": self.user_agent, "Accept": "*/*"}
-        try:
-            t0 = time.time()
-            resp = _get(url, headers=headers, proxy=self.proxy, timeout=5)
-            rtt = (time.time() - t0) / 2  # 半 RTT 补偿
-            server_date = resp.headers.get('Date', '') or resp.headers.get('date', '')
-            if server_date:
-                server_dt = parsedate_to_datetime(server_date)
-                server_ts = server_dt.timestamp()
-                local_ts = t0 + rtt
-                offset = local_ts - server_ts
-                return offset
-        except Exception as e:
-            pass
-        return 0.0
+
+        samples = []  # [(rtt_half, offset), ...]
+
+        # 1. 5 次采样
+        for _ in range(5):
+            try:
+                t0 = time.time()
+                resp = _get(url, headers=headers, proxy=self.proxy, timeout=5)
+                rtt_half = (time.time() - t0) / 2
+                server_date = resp.headers.get('Date', '') or resp.headers.get('date', '')
+                if server_date:
+                    server_ts = parsedate_to_datetime(server_date).timestamp()
+                    offset = (t0 + rtt_half) - server_ts
+                    samples.append((rtt_half, offset))
+            except Exception:
+                continue
+
+        if not samples:
+            return self._time_offset  # 采样全失败，返回历史值
+
+        # 2. 按 RTT 升序，取前 3 快（最多 3）
+        samples.sort(key=lambda x: x[0])
+        top = samples[:min(3, len(samples))]
+        min_rtt = top[0][0]
+
+        # 3. 快样本 EWMA：RTT 置信度加权
+        #    confidence = min_rtt / rtt, 范围 (0, 1]
+        #    weight = 0.3 + 0.4 * confidence, 范围 [0.3, 0.7]
+        if len(top) == 1:
+            round_offset = top[0][1]
+        else:
+            estimate = top[0][1]
+            for rtt, offset in top[1:]:
+                confidence = min_rtt / max(rtt, 0.0001)
+                alpha = 0.3 + 0.4 * confidence
+                estimate = alpha * offset + (1 - alpha) * estimate
+            round_offset = estimate
+
+        # 4. 更新方差（用于诊断）
+        offsets = [s[1] for s in samples]
+        mean = sum(offsets) / len(offsets)
+        self._time_offset_var = sum((o - mean) ** 2 for o in offsets) / len(offsets)
+
+        # 5. 跨轮 EWMA 收敛
+        self._time_offset_count += 1
+        n = self._time_offset_count
+        # α 从 0.8 衰减到 0.05，让估计逐渐稳定
+        cross_alpha = 0.8 / (1 + n * 0.15)
+        cross_alpha = max(cross_alpha, 0.05)
+
+        if self._time_offset == 0.0 and n == 1:
+            self._time_offset = round_offset  # 首次直接用
+        else:
+            self._time_offset = cross_alpha * round_offset + (1 - cross_alpha) * self._time_offset
+
+        # 返回 (offset, min_rtt_half) 供客户端计算 NETWORK_ADVANCE
+        # min_rtt_half = 最小 RTT/2 ≈ 单程延迟，用于精确控制请求到达时间
+        self._min_rtt_half = min_rtt
+        return self._time_offset
 
     def warmup_connections(self):
         """
         抢购前预热所有关键连接，消除首次握手延迟
-        - 邦盛设备验证
-        - 商品详情
-        - 购买信息
+        - 邦盛设备验证（★ 临时直连，避免代理IP被目标站标记）
+        - 验证结果缓存5分钟，后续抢购直接复用，不再通过代理暴露IP
         """
+        # ★ 临时直连做邦盛验证：避免代理IP在预热阶段就被CDN/WAF标记
+        # 验证结果缓存后，真实抢购时不再调此接口 → 代理IP仅在抢购时才可见
+        saved_proxy = self.proxy
+        self.proxy = None
         try:
             self.bangcle_verify()
         except Exception:
             pass
+        self.proxy = saved_proxy
 
     # ==================== 抢购前置: 邦盛设备验证 ====================
 
@@ -768,9 +828,52 @@ class MoutaiClient:
 
     # ==================== 抢购 ====================
 
+    def prepare_rush_purchase(self, item_code: str, item_priority_act_id: str,
+                              amount: str = "1", source_id: str = "",
+                              spu_code: str = "") -> dict:
+        """预构建抢购请求（含 WASM 签名 + AES 加密），与 POST 分离。
+        在窗口到达前完成所有耗时操作，窗口到达瞬间只需发 POST。
+        返回 {"headers": ..., "body": ..., "url": ...}"""
+        data = {
+            "amount": amount, "itemCode": item_code,
+            "itemPriorityActId": item_priority_act_id,
+            "userInfoBaseContext": {
+                "addressLat": "", "addressLng": "",
+                "appUserAgent": self.user_agent,
+                "deviceId": self.mt_device_id, "mtr": self.mt_r,
+            },
+            "ydLogId": "", "ydToken": "",
+        }
+        act_param = generate_act_param(data)
+        body = {"actParam": act_param}
+        branch = {'741':'one','11947':'two','11945':'two','11942':'two','1741':'three'}.get(str(item_code))
+        rush_url = f"{H5_BASE_URL}/xhr/front/trade/priority/rushPurchase"
+        if branch:
+            rush_url += f"/hot/branch/{branch}"
+        referer_map = {
+            '741': 'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
+            '483': 'https://h5.moutai519.com.cn/mt/item/1000ml-detail?appConfig=2_1_2',
+            '10193': 'https://h5.moutai519.com.cn/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006',
+            '11335': 'https://h5.moutai519.com.cn/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006',
+            '11947': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
+            '11945': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
+            '11942': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
+            '1741': 'https://h5.moutai519.com.cn/mt/item/jpmt-detail?appConfig=2_1_2',
+            '10220': 'https://h5.moutai519.com.cn/mt/item/grad-detail?appConfig=2_1_2',
+        }
+        referer = referer_map.get(str(item_code),
+            'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2')
+        if spu_code and not source_id:
+            referer += f"&sourceId={spu_code}"
+        elif source_id:
+            referer += f"&sourceId={source_id}"
+        headers = self._h5_headers(body, referer=referer, is_rush_purchase=True)
+        return {"headers": headers, "body": body, "url": rush_url}
+
     def rush_purchase(self, item_code: str, item_priority_act_id: str,
                       amount: str = "1", source_id: str = "",
-                      timeout: int = 4, spu_code: str = "") -> dict:
+                      timeout: int = 4, spu_code: str = "",
+                      prebuilt: dict = None) -> dict:
         """
         抢购 (HAR方式: item_code=skuId, item_priority_act_id=actId)
 
@@ -785,64 +888,74 @@ class MoutaiClient:
         POST https://h5.moutai519.com.cn/xhr/front/trade/priority/rushPurchase[/hot/branch/{branch}]
         body: {"actParam": "..."}
         """
-        # 构造请求体 (与 HAR 真机完全对齐)
-        data = {
-            "amount": amount,
-            "itemCode": item_code,
-            "itemPriorityActId": item_priority_act_id,
-            "userInfoBaseContext": {
-                "addressLat": "",
-                "addressLng": "",
-                "appUserAgent": self.user_agent,
-                "deviceId": self.mt_device_id,
-                "mtr": self.mt_r,
-            },
-            "ydLogId": "",
-            "ydToken": "",
-        }
-        print('\n数量:{}-----itemCode:{}-----itemPriorityActId:{}'.format(amount,item_code,item_priority_act_id))
+        # ★ 预构建模式：跳过所有耗时操作（WASM签名/AES加密），窗口到达瞬间直接 POST
+        if prebuilt:
+            headers = prebuilt["headers"]
+            body = prebuilt["body"]
+            rush_url = prebuilt["url"]
+            send_ts = time.time()
+        else:
+            # 构造请求体 (与 HAR 真机完全对齐)
+            data = {
+                "amount": amount,
+                "itemCode": item_code,
+                "itemPriorityActId": item_priority_act_id,
+                "userInfoBaseContext": {
+                    "addressLat": "",
+                    "addressLng": "",
+                    "appUserAgent": self.user_agent,
+                    "deviceId": self.mt_device_id,
+                    "mtr": self.mt_r,
+                },
+                "ydLogId": "",
+                "ydToken": "",
+            }
+            send_ts = time.time()
+            send_str = datetime.fromtimestamp(send_ts).strftime('%H:%M:%S.%f')[:-3]
+            # DEBUG: print(f'\n[{send_str}] 数量:{amount}-----itemCode:{item_code}-----itemPriorityActId:{item_priority_act_id}')
 
-        # 生成 actParam (AES 加密)
-        act_param = generate_act_param(data)
-        body = {"actParam": act_param}
+            # 生成 actParam (AES 加密)
+            act_param = generate_act_param(data)
+            body = {"actParam": act_param}
 
-        # 按 item_code 确定抢购 URL 和 Referer（热门商品走分支链路）
-        item_branch_map = {
-            '741': 'one', '11947': 'two', '11945': 'two', '11942': 'two', '1741': 'three',
-        }
-        branch = item_branch_map.get(str(item_code))
-        base_rush_url = f"{H5_BASE_URL}/xhr/front/trade/priority/rushPurchase"
-        rush_url = f"{base_rush_url}/hot/branch/{branch}" if branch else base_rush_url
+            # 按 item_code 确定抢购 URL 和 Referer（热门商品走分支链路）
+            item_branch_map = {
+                '741': 'one', '11947': 'two', '11945': 'two', '11942': 'two', '1741': 'three',
+            }
+            branch = item_branch_map.get(str(item_code))
+            base_rush_url = f"{H5_BASE_URL}/xhr/front/trade/priority/rushPurchase"
+            rush_url = f"{base_rush_url}/hot/branch/{branch}" if branch else base_rush_url
 
-        item_referer_map = {
-            '741':   'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
-            '483':   'https://h5.moutai519.com.cn/mt/item/1000ml-detail?appConfig=2_1_2',
-            '10193': 'https://h5.moutai519.com.cn/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006',
-            '11335': 'https://h5.moutai519.com.cn/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006',
-            '11947': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
-            '11945': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
-            '11942': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
-            '1741':  'https://h5.moutai519.com.cn/mt/item/jpmt-detail?appConfig=2_1_2',
-            '10220': 'https://h5.moutai519.com.cn/mt/item/grad-detail?appConfig=2_1_2',
-        }
-        referer = item_referer_map.get(
-            str(item_code),
-            f'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2'
-        )
-        # spu_code 用于拼接 sourceId（moutai_client_worker.py 传入）
-        if spu_code and not source_id:
-            referer += f"&sourceId={spu_code}"
-        elif source_id:
-            referer += f"&sourceId={source_id}"
+            item_referer_map = {
+                '741':   'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
+                '483':   'https://h5.moutai519.com.cn/mt/item/1000ml-detail?appConfig=2_1_2',
+                '10193': 'https://h5.moutai519.com.cn/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006',
+                '11335': 'https://h5.moutai519.com.cn/mt/item/xft-detail?appConfig=2_1_2&sourceId=IMTP1000006',
+                '11947': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
+                '11945': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
+                '11942': 'https://h5.moutai519.com.cn/mt/item/mm-485-detail-group?appConfig=2_1_2',
+                '1741':  'https://h5.moutai519.com.cn/mt/item/jpmt-detail?appConfig=2_1_2',
+                '10220': 'https://h5.moutai519.com.cn/mt/item/grad-detail?appConfig=2_1_2',
+            }
+            referer = item_referer_map.get(
+                str(item_code),
+                f'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2'
+            )
+            # spu_code 用于拼接 sourceId（moutai_client_worker.py 传入）
+            if spu_code and not source_id:
+                referer += f"&sourceId={spu_code}"
+            elif source_id:
+                referer += f"&sourceId={source_id}"
 
-        # 使用 H5 Headers (Content-Web-Bb / Content-Hh-Bb / Sdk-Ver-Bb) - 与 HAR 一致
-        headers = self._h5_headers(body, referer=referer, is_rush_purchase=True)
+            # 使用 H5 Headers (Content-Web-Bb / Content-Hh-Bb / Sdk-Ver-Bb) - 与 HAR 一致
+            headers = self._h5_headers(body, referer=referer, is_rush_purchase=True)
 
         # print(f"[抢购] itemCode={item_code}, actId={item_priority_act_id}, amount={amount}")
         # print(f"[抢购] MT-K: {headers['MT-K']}")
         # print(f"[抢购] Content-Hh-Bb: {headers['Content-Hh-Bb']}")
         # print(f'抢购地址：url={rush_url}')
 
+        req_ts = time.time()
         resp = _post(
             rush_url,
             headers=headers,
@@ -850,11 +963,28 @@ class MoutaiClient:
             timeout=timeout,
             proxy=self.proxy,
         )
+        recv_ts = time.time()
+        rtt_half = (recv_ts - req_ts) / 2
+
+        # 服务器时间（HTTP Date 响应头 + RTT/2 补偿）
+        try:
+            from email.utils import parsedate_to_datetime
+            server_dt = parsedate_to_datetime(resp.headers.get('Date', ''))
+            server_time = datetime.fromtimestamp(server_dt.timestamp() + rtt_half).strftime('%H:%M:%S.%f')[:-3]
+        except Exception:
+            server_time = 'N/A'
+
         try:
             result = resp.json()
+            if not isinstance(result, dict):
+                # 处理 API 返回非字典类型（如纯整数 2000）
+                result = {"code": result, "message": str(resp.text)[:200]}
         except Exception:
             result = {"code": resp.status_code, "raw": resp.text}
-        print(f"[抢购] 响应: {result}")
+        result['_server_time'] = server_time
+        result['_http_status'] = resp.status_code
+        result['_raw_text'] = str(resp.text)[:500]
+        # DEBUG: print(f"[{send_str}] [抢购] 响应: {result} [服务器时间: {server_time}]")
         return result
 
     # ==================== 验证码校验 (网易易盾) ====================

@@ -5,101 +5,23 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="7415a875-3ff4-433f-9ae0-e1560d0e1e8c" name="更改" comment="">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Account_aging/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiCrypto.kt" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiCrypto.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Account_aging_temp" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Account_aging_temp/.github/workflows/build_native.yml" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp/.github/workflows/build_native.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/data/ApiClient.kt" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/data/ApiClient.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/data/ApiService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/data/ApiService.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/service/MoutaiRushService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/service/MoutaiRushService.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiClient.kt" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiClient.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiCrypto.kt" beforeDir="false" afterPath="$PROJECT_DIR$/Account_aging_temp/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiCrypto.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/_check_postdata.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_extract_for_replay.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_extract_security.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_har_parse.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_har_parse2.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_har_parse_new.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_net_diag.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_parse_har.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_parse_har2.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_replay_test.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_search_har.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_show_details.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/analyze_cdn.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/analyze_har.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/check_syntax.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/extract_security_har.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/moxing API.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_api.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_write.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/x.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/accounts.json" beforeDir="false" afterPath="$PROJECT_DIR$/养猫游戏/accounts.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/app.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/config.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/crypto.py" beforeDir="false" afterPath="$PROJECT_DIR$/养猫游戏/crypto.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/demo.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/external_api.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/models.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/moutai_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/static/style.css" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/tasks.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/templates/base.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/templates/dashboard.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/templates/login.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽/templates/register.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/accounts.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/crypto.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/demo.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/deploy.sh.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/moutai_automation.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/moutai_client_worker.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/templates/base.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/templates/dashboard.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/templates/login.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽2/templates/register.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app/app-debug.apk" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app/app-debug.apk" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/养猫游戏/demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/养猫游戏/demo老.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/data/ApiClient.kt" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/data/ApiClient.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/data/ApiService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/data/ApiService.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/service/MoutaiRushService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/service/MoutaiRushService.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/README.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/SmsCatcher.kt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/accounts.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/app.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/config.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/crypto.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/养猫游戏/demo.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/external_api.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/models.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/requirements.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/static/style.css" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/tasks.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/templates/base.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/templates/dashboard.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/templates/login.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/templates/register.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/新建 XLSX 工作表.xlsx" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/新建文本文档.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/安利/格式化包.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/accounts.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/crypto.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/demo.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/deploy.sh.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/moutai_automation.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/moutai_client_worker.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/templates/base.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/templates/dashboard.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/templates/login.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3-备份/templates/register.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/accounts.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/crypto.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/debug_server.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/demo.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/deploy.sh.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/moutai_automation.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/moutai_client_worker.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/templates/base.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/templates/dashboard.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/templates/login.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈3/templates/register.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈4/app_fastapi.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈4/crypto.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈4/demo.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/猫妈妈4/moutai_client_worker.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiClient.kt" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/app/src/main/java/top/ipla/phone_proxy/util/MoutaiClient.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/gradle.properties" beforeDir="false" afterPath="$PROJECT_DIR$/媽媽5/phone_proxy_app/native/gradle.properties" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -140,29 +62,29 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.main.executor": "Run",
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "WebServerToolWindowFactoryState": "false",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "master",
-    "junie.onboarding.icon.badge.shown": "true",
-    "last_opened_file_path": "D:/采购管理/养猫游戏",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "project.propVCSSupport.DirectoryMappings",
-    "to.speed.mode.migration.done": "true",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/采购管理/养猫游戏&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder CN&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\采购管理\养猫游戏" />
@@ -176,7 +98,7 @@
       <recent name="D:\采购管理\媽媽5\抓包" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.moutai_client_worker">
+  <component name="RunManager" selected="Python.demo老">
     <configuration name="_decrypt_actparam" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="采购管理" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -199,28 +121,6 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="demo (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="采购管理" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/媽媽5" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/媽媽5/demo.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
     <configuration name="demo" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="采购管理" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -235,6 +135,50 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/养猫游戏/demo.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="demo老" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="采购管理" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/养猫游戏" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/养猫游戏/demo老.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="demo老" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="采购管理" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/养猫游戏" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/养猫游戏/demo老.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -289,11 +233,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.moutai_automation" />
+        <item itemvalue="Python.demo老" />
         <item itemvalue="Python.moutai_client_worker" />
-        <item itemvalue="Python._decrypt_actparam" />
+        <item itemvalue="Python.moutai_automation" />
         <item itemvalue="Python.demo" />
-        <item itemvalue="Python.demo (1)" />
+        <item itemvalue="Python._decrypt_actparam" />
       </list>
     </recent_temporary>
   </component>
@@ -379,7 +323,18 @@
       <workItem from="1780232969758" duration="1032000" />
       <workItem from="1780234126870" duration="4660000" />
       <workItem from="1780239442174" duration="122000" />
-      <workItem from="1780239571833" duration="17880000" />
+      <workItem from="1780239571833" duration="28232000" />
+      <workItem from="1780338633639" duration="5307000" />
+      <workItem from="1780343969482" duration="163000" />
+      <workItem from="1780344140964" duration="2486000" />
+      <workItem from="1780348631725" duration="31524000" />
+      <workItem from="1780400222992" duration="5599000" />
+      <workItem from="1780405885701" duration="6665000" />
+      <workItem from="1780428879814" duration="29498000" />
+      <workItem from="1780479799175" duration="145000" />
+      <workItem from="1780479957416" duration="13463000" />
+      <workItem from="1780571360465" duration="403000" />
+      <workItem from="1780571773520" duration="10370000" />
     </task>
     <servers />
   </component>
@@ -388,7 +343,7 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/$main_backup_before_cleanup.coverage" NAME="main_backup_before_cleanup Coverage Results" MODIFIED="1779288050428" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
-    <SUITE FILE_PATH="coverage/$demo.coverage" NAME="demo Coverage Results" MODIFIED="1780243484012" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/养猫游戏" />
+    <SUITE FILE_PATH="coverage/$demo.coverage" NAME="demo老 Coverage Results" MODIFIED="1780574557912" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/养猫游戏" />
     <SUITE FILE_PATH="coverage/$check_db_p.coverage" NAME="check_db.p Coverage Results" MODIFIED="1779172060840" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$2.coverage" NAME="客户端2 Coverage Results" MODIFIED="1779343747983" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$build_client.coverage" NAME="build_client Coverage Results" MODIFIED="1779876062847" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
@@ -398,12 +353,12 @@
     <SUITE FILE_PATH="coverage/$1.coverage" NAME="客户端1 Coverage Results" MODIFIED="1779333204692" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$main.coverage" NAME="main Coverage Results" MODIFIED="1779964077206" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$moutai_automation__1_.coverage" NAME="moutai_automation (1) Coverage Results" MODIFIED="1780220299024" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/养猫游戏" />
-    <SUITE FILE_PATH="coverage/$moutai_automation.coverage" NAME="moutai_automation Coverage Results" MODIFIED="1780257273612" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
+    <SUITE FILE_PATH="coverage/$moutai_automation.coverage" NAME="moutai_automation Coverage Results" MODIFIED="1780388808577" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$moutai_client_worker2.coverage" NAME="moutai_client_worker2 Coverage Results" MODIFIED="1779192296707" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$app.coverage" NAME="app Coverage Results" MODIFIED="1779365287849" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽" />
     <SUITE FILE_PATH="coverage/$demo__1_.coverage" NAME="demo (1) Coverage Results" MODIFIED="1780237411073" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$4.coverage" NAME="客户端4 Coverage Results" MODIFIED="1779281318935" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
-    <SUITE FILE_PATH="coverage/$moutai_client_worker.coverage" NAME="moutai_client_worker Coverage Results" MODIFIED="1780250152662" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
+    <SUITE FILE_PATH="coverage/$moutai_client_worker.coverage" NAME="moutai_client_worker Coverage Results" MODIFIED="1780573686972" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
     <SUITE FILE_PATH="coverage/$3.coverage" NAME="客户端3 Coverage Results" MODIFIED="1779280124482" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/媽媽5" />
   </component>
 </project>
