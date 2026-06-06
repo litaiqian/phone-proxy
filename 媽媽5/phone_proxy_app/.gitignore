@@ -1,0 +1,11 @@
+*.apk
+*.zip
+*.jar
+apk-extract/
+new_apk/
+_apk_new/
+apk_dl.zip
+buildozer.spec
+gradle-8.7/
+.gradle/
+.buildozer/

@@ -1,0 +1,45 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 猫头 -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M54,28 C64,28 72,36 72,46 L72,56 C72,58 70,60 68,60 L40,60 C38,60 36,58 36,56 L36,46 C36,36 44,28 54,28 Z" />
+    <!-- 猫耳朵 -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M38,38 L28,18 L42,32 Z" />
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M70,38 L80,18 L66,32 Z" />
+    <!-- 眼睛 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,42 A4,5 0 1,0 45,52 A4,5 0 1,0 45,42 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M63,42 A4,5 0 1,0 63,52 A4,5 0 1,0 63,42 Z" />
+    <!-- 瞳孔 -->
+    <path
+        android:fillColor="#1A1A1A"
+        android:pathData="M46,44 A2,2.5 0 1,0 46,49 A2,2.5 0 1,0 46,44 Z" />
+    <path
+        android:fillColor="#1A1A1A"
+        android:pathData="M64,44 A2,2.5 0 1,0 64,49 A2,2.5 0 1,0 64,44 Z" />
+    <!-- 鼻子 -->
+    <path
+        android:fillColor="#FF8C69"
+        android:pathData="M52,50 L56,50 L54,53 Z" />
+    <!-- 嘴巴 -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M54,53 C54,53 50,57 48,56 M54,53 C54,53 58,57 60,56" />
+    <!-- 胡须 -->
+    <path
+        android:fillColor="#FFB89A"
+        android:pathData="M28,48 L38,50 M28,52 L38,52 M80,48 L70,50 M80,52 L70,52"
+        android:strokeWidth="1"
+        android:strokeColor="#FFB89A" />
+</vector>

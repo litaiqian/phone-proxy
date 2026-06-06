@@ -23,7 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, Text, BigInteger, JSON, Enum
 from sqlalchemy.orm import declarative_base, sessionmaker, Session as SQLSession
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
@@ -239,7 +239,7 @@ _build_lock = asyncio.Lock()  # 防止同一用户重复触发构建
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'your-secret-key-change-in-production'
-    MYSQL_HOST = 'ipla.top'
+    MYSQL_HOST = '127.0.0.1'
     MYSQL_PORT = 3306
     MYSQL_USER = 'maomama'
     MYSQL_PASSWORD = 'aQ9SnwTx6i4QzRhx'
@@ -308,7 +308,7 @@ WHITELIST_IPS = [
 Base = declarative_base()
 engine = create_engine(
     Config.SQLALCHEMY_DATABASE_URI,
-    pool_size=10, max_overflow=20, pool_timeout=30, pool_recycle=1800,
+    pool_size=20, max_overflow=40, pool_timeout=30, pool_recycle=1800,
     echo=False, connect_args={"connect_timeout": 5}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -405,7 +405,8 @@ class UserConfig(Base):
     async_rush = Column(Boolean, default=False)            # 异步抢购开关：开=每个IP独立并发抢购，关=IP轮询顺序抢购
 
 class UserProxy(Base):
-    """IP代理 + 防封策略，每用户独立"""
+    """IP代理 + 防封策略，每用户独立
+    cat_food_seconds: 累计在线秒数（持久化到DB，服务重启不丢失）"""
     __tablename__ = 'user_proxy'
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=False, unique=True, index=True)
@@ -415,6 +416,7 @@ class UserProxy(Base):
     anti_ban_429_delay = Column(Integer, default=3)
     anti_ban_bangcle_ttl = Column(Integer, default=300)
     anti_ban_account_cooldown = Column(Integer, default=200)
+    cat_food_seconds = Column(Float, default=0.0)
 
 
 # ===================== 辅助函数 =====================
@@ -689,6 +691,18 @@ async def lifespan(app: FastAPI):
     except:
         pass
 
+    # 迁移 user_proxy 字段（猫粮持久化）
+    try:
+        inspector = inspect(engine)
+        up_columns = [col['name'] for col in inspector.get_columns('user_proxy')]
+        with engine.connect() as conn:
+            if 'cat_food_seconds' not in up_columns:
+                conn.execute(text('ALTER TABLE user_proxy ADD COLUMN cat_food_seconds FLOAT DEFAULT 0'))
+                conn.commit()
+                print('[迁移] user_proxy 表添加 cat_food_seconds 列')
+    except:
+        pass
+
     # 迁移 team / team_account 表
     try:
         inspector = inspect(engine)
@@ -789,6 +803,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="猫妈妈自动化系统-FastAPI", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=Config.SECRET_KEY, session_cookie="moutai_session")
+
+# ===================== API 重定向拦截中间件 =====================
+# /api/* 路由绝不返回 3xx 重定向，避免客户端 OkHttp 陷入重定向循环
+from starlette.middleware.base import BaseHTTPMiddleware
+class ApiNoRedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith('/api/') and 300 <= response.status_code < 400:
+            location = response.headers.get('location', '')
+            print(f'[API重定向拦截] {request.method} {request.url.path} → {response.status_code} {location}')
+            return JSONResponse(
+                status_code=502,
+                content={'ok': False, 'error': f'服务器异常重定向({response.status_code})，请检查服务器状态'}
+            )
+        return response
+app.add_middleware(ApiNoRedirectMiddleware)
 
 TEMPLATES_DIR = os.path.join(BASEDIR, "templates")
 if not os.path.exists(TEMPLATES_DIR):
@@ -2243,6 +2273,408 @@ async def broadcast_phone_status_to_user(user_id: int, status_data: dict):
         await broadcast_to_phone_device(did, {'type': 'status_change', **status_data})
 
 
+# ===================== 空壳架构：预构建请求包 =====================
+
+# 抢购 URL 分支映射（对应 demo.py item_branch_map）
+_RUSH_BRANCH_MAP = {
+    '741': 'one', '11947': 'two', '11945': 'two', '11942': 'two', '1741': 'three',
+}
+
+
+def _get_rush_url(item_code: str) -> str:
+    """根据 item_code/sku_id 获取抢购 URL"""
+    branch = _RUSH_BRANCH_MAP.get(str(item_code))
+    base = "https://h5.moutai519.com.cn/xhr/front/trade/priority/rushPurchase"
+    return f"{base}/hot/branch/{branch}" if branch else base
+
+
+async def _handle_request_prebuilt(websocket: WebSocket, msg: dict, user_id: int, device_id: str):
+    """处理手机端预构建请求 — 为所有账号预构建抢购 HTTP 请求包"""
+    from crypto import build_rush_request, APP_VERSION as CRYPTO_APP_VERSION
+    from routes.api_client import _get_phone_accounts, phone_devices
+    import datetime as _dt
+
+    round_id = msg.get('round_id', '')
+    print(f'[手机WS] 📦 收到预构建请求 | device={device_id} | round={round_id}')
+
+    try:
+        db2 = next(get_db())
+        cfg2 = get_user_config(user_id, db2)
+        multi_open = getattr(cfg2, 'phone_multi_open_count', 3) or 3
+        device_assign = getattr(cfg2, 'phone_device_assign', '')
+        all_accounts = _get_phone_accounts(user_id, multi_open, db2, device_assign)
+
+        # 多手机均分账号（与心跳下发逻辑一致）
+        now_ts = time.time()
+        sibling_devices = sorted([
+            d for d, info in phone_devices.items()
+            if info.get('uploader_id') == user_id and now_ts - info.get('last_heartbeat', 0) < 35
+        ])
+        phone_count = max(len(sibling_devices), 1)
+        phone_index = sibling_devices.index(device_id) if device_id in sibling_devices else 0
+
+        if all_accounts and phone_count > 1:
+            chunk_size = max(1, len(all_accounts) // phone_count)
+            start = phone_index * chunk_size
+            end = start + chunk_size if phone_index < phone_count - 1 else len(all_accounts)
+            accounts = all_accounts[start:end]
+        else:
+            accounts = all_accounts
+
+        if not accounts:
+            await websocket.send_text(json.dumps({
+                'type': 'prebuilt_packets', 'round_id': round_id,
+                'error': '无可用账号', 'packets': [],
+            }, ensure_ascii=False))
+            db2.close()
+            return
+
+        task_frequency = getattr(cfg2, 'task_frequency', 100) or 100
+        rush_count = getattr(cfg2, 'rush_count', 100) or 100
+        db2.close()
+
+        # 构建每个账号的预构建请求包
+        packets = []
+        for i, acc in enumerate(accounts):
+            try:
+                item_code = acc.get('item_code', 'IMTP1000313')
+                activity_id = str(acc.get('activity_id', '82107'))
+                raw_device_id = acc.get('raw_device_id', '')
+                token = acc.get('token', '')  # MT-Token-Wap
+                amount = str(acc.get('amount', 1))
+                user_agent = acc.get('webview_ua', '') or acc.get('user_agent', '')
+                h5_did = acc.get('h5_did', '')
+                h5_start_id = acc.get('h5_start_id', '')
+                h5_user_id = acc.get('user_id', '')
+
+                # 使用 crypto.build_rush_request 构建完整请求
+                headers, cookies, body = build_rush_request(
+                    item_code=item_code,
+                    item_priority_act_id=activity_id,
+                    device_id=raw_device_id,
+                    cookie=token,
+                    amount=amount,
+                    user_agent=user_agent,
+                    h5_did=h5_did,
+                    h5_start_id=h5_start_id,
+                    h5_user_id=h5_user_id,
+                )
+
+                # ★ MT-K 设为占位符，手机端在 T-0 替换为实时时间戳
+                headers['MT-K'] = '__MTK__'
+
+                # 合并 Cookie 为单个 header 字符串
+                cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
+                headers['Cookie'] = cookie_str
+
+                rush_url = _get_rush_url(item_code)
+
+                packets.append({
+                    'account_index': i,
+                    'phone': acc.get('phone', ''),
+                    'url': rush_url,
+                    'method': 'POST',
+                    'headers': headers,
+                    'body': json.dumps(body),
+                    'raw_device_id': raw_device_id,
+                })
+            except Exception as e:
+                print(f'[手机WS] ⚠️ 账号{i}预构建失败: {e}')
+
+        print(f'[手机WS] ✅ 预构建完成 | {len(packets)}/{len(accounts)}个请求包 | device={device_id}')
+
+        await websocket.send_text(json.dumps({
+            'type': 'prebuilt_packets',
+            'round_id': round_id,
+            'rush_time': '',  # 手机端已有时间
+            'frequency_ms': task_frequency,
+            'rush_count': rush_count,
+            'packets': packets,
+        }, ensure_ascii=False))
+
+    except Exception as e:
+        import traceback as _tb
+        print(f'[手机WS] ❌ 预构建异常: {e}')
+        _tb.print_exc()
+        await websocket.send_text(json.dumps({
+            'type': 'prebuilt_packets', 'round_id': round_id,
+            'error': str(e), 'packets': [],
+        }, ensure_ascii=False))
+
+
+# 中继状态追踪: {(round_id, account_index): {step, priority_record_id, ...}}
+_relay_states: dict = {}
+
+
+async def _handle_rush_response(websocket: WebSocket, msg: dict, user_id: int, device_id: str):
+    """处理手机回传的抢购/中继结果"""
+    round_id = msg.get('round_id', '')
+    account_index = msg.get('account_index', -1)
+    phone = msg.get('phone', '')
+    response_code = msg.get('response_code', -1)
+    body = msg.get('body', '')
+    elapsed_ms = msg.get('elapsed_ms', 0)
+    relay_key = (round_id, account_index)
+
+    # 检查是否有进行中的中继流程
+    relay_state = _relay_states.get(relay_key)
+
+    if relay_state:
+        # ★ 中继响应处理
+        step = relay_state.get('step', '')
+        print(f'[中继] 📥 [{phone}] {step} 响应 | code={response_code} | {elapsed_ms}ms')
+
+        if response_code != 2000:
+            print(f'[中继] ❌ [{phone}] {step} 失败(code={response_code}) → 终止中继')
+            _relay_states.pop(relay_key, None)
+            return
+
+        # 根据当前步骤决定下一步
+        if step == 'get_address':
+            await _relay_compose(websocket, relay_key, relay_state, body)
+        elif step == 'compose':
+            await _relay_submit(websocket, relay_key, relay_state)
+        elif step == 'submit':
+            await _relay_pay(websocket, relay_key, relay_state, body)
+        elif step == 'pay':
+            print(f'[中继] 🎉 [{phone}] 支付流程完成!')
+            _relay_states.pop(relay_key, None)
+        return
+
+    # ★ 普通抢购回传
+    print(f'[手机WS] 📤 抢购回传 | device={device_id} | [{phone}] code={response_code} | {elapsed_ms}ms')
+    log_content = json.dumps({
+        'round_id': round_id, 'device_id': device_id,
+        'account_index': account_index, 'phone': phone,
+        'response_code': response_code, 'body': body[:2000],
+        'elapsed_ms': elapsed_ms,
+    }, ensure_ascii=False)
+    _save_phone_ws_log(device_id, f"{round_id}_{phone}", log_content, 'rush_result')
+
+    # ★ 抢购成功 → 触发组单/下单/支付中继流程
+    if response_code == 2000:
+        print(f'[手机WS] 🎯 [{phone}] 抢购成功! 触发中继流程...')
+        try:
+            resp_data = json.loads(body) if isinstance(body, str) else body
+            priority_record_id = resp_data.get('data', {}).get('priorityRecordId', 0)
+            if priority_record_id:
+                _relay_states[relay_key] = {
+                    'step': 'init', 'round_id': round_id, 'account_index': account_index,
+                    'phone': phone, 'priority_record_id': priority_record_id,
+                    'user_id': user_id, 'device_id': device_id,
+                }
+                asyncio.create_task(_relay_get_address(websocket, relay_key))
+        except Exception as e:
+            print(f'[手机WS] ❌ 中继触发失败: {e}')
+
+
+async def _relay_get_address(websocket: WebSocket, relay_key: tuple):
+    """中继步骤1: 获取收货地址"""
+    state = _relay_states.get(relay_key)
+    if not state: return
+    phone = state['phone']
+    user_id = state['user_id']
+    round_id = state['round_id']
+    account_index = state['account_index']
+
+    # 获取账号信息
+    acc = await _get_relay_account(phone, user_id)
+    if not acc: return
+
+    state['step'] = 'get_address'
+    state['_token'] = acc.get('token', '')
+    state['_user_agent'] = acc.get('webview_ua', '') or acc.get('user_agent', '')
+    state['_raw_device_id'] = acc.get('raw_device_id', '')
+    state['_sku_id'] = acc.get('sku_id', '741')
+    state['_item_code'] = acc.get('item_code', 'IMTP1000313')
+    state['_amount'] = acc.get('amount', 1)
+
+    headers = {
+        'Host': 'h5.moutai519.com.cn', 'MT-K': '__MTK__',
+        'Cookie': f'MT-Token-Wap={state["_token"]}',
+        'User-Agent': state['_user_agent'],
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': 'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
+    }
+    await websocket.send_text(json.dumps({
+        'type': 'relay_request', 'round_id': round_id,
+        'account_index': account_index, 'phone': phone,
+        'url': 'https://h5.moutai519.com.cn/xhr/front/user/address/list',
+        'method': 'GET', 'headers': headers, 'body': '',
+        'raw_device_id': state['_raw_device_id'],
+    }, ensure_ascii=False))
+    print(f'[中继] 📤 get_address | [{phone}]')
+
+
+async def _relay_compose(websocket: WebSocket, relay_key: tuple, relay_state: dict, resp_body: str):
+    """中继步骤2: 组单"""
+    phone = relay_state['phone']
+    rid = relay_state['priority_record_id']
+    sku_id = relay_state.get('_sku_id', '741')
+    amount = relay_state.get('_amount', 1)
+
+    # 解析地址
+    try:
+        addr_data = json.loads(resp_body) if isinstance(resp_body, str) else resp_body
+        addrs = addr_data.get('data', [])
+        addr = next((a for a in addrs if a.get('dft')), addrs[0] if addrs else {})
+        address_id = addr.get('shipAddressId', 0)
+        relay_state['_address_id'] = address_id
+    except Exception as e:
+        print(f'[中继] ❌ [{phone}] 地址解析失败: {e}')
+        _relay_states.pop(relay_key, None)
+        return
+
+    relay_state['step'] = 'compose'
+    from crypto import build_rush_request, generate_mt_device_id, generate_mt_r
+
+    raw_device_id = relay_state.get('_raw_device_id', '')
+    token = relay_state.get('_token', '')
+    user_agent = relay_state.get('_user_agent', '')
+
+    # 构建 compose 请求体
+    mt_device = generate_mt_device_id(raw_device_id)
+    compose_body = {
+        'addressId': address_id,
+        'count': amount,
+        'deviceId': mt_device,
+        'priorityRecordId': rid,
+        'purchaseType': 1,
+        'shopId': '0',
+        'source': 'H5',
+        'spuId': sku_id,
+    }
+
+    headers = {
+        'Host': 'h5.moutai519.com.cn', 'MT-K': '__MTK__',
+        'MT-Device-ID': mt_device,
+        'Cookie': f'MT-Token-Wap={token}',
+        'User-Agent': user_agent,
+        'content-type': 'application/json',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': 'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
+    }
+
+    await websocket.send_text(json.dumps({
+        'type': 'relay_request', 'round_id': relay_state['round_id'],
+        'account_index': relay_state['account_index'], 'phone': phone,
+        'url': f'https://h5.moutai519.com.cn/xhr/front/trade/compose/v2',
+        'method': 'POST', 'headers': headers,
+        'body': json.dumps(compose_body),
+        'raw_device_id': raw_device_id,
+    }, ensure_ascii=False))
+    print(f'[中继] 📤 compose | [{phone}] rid={rid} addr={address_id}')
+
+
+async def _relay_submit(websocket: WebSocket, relay_key: tuple, relay_state: dict):
+    """中继步骤3: 提交订单"""
+    phone = relay_state['phone']
+    rid = relay_state['priority_record_id']
+    sku_id = relay_state.get('_sku_id', '741')
+    amount = relay_state.get('_amount', 1)
+    address_id = relay_state.get('_address_id', 0)
+
+    relay_state['step'] = 'submit'
+    from crypto import generate_mt_device_id
+
+    raw_device_id = relay_state.get('_raw_device_id', '')
+    token = relay_state.get('_token', '')
+    user_agent = relay_state.get('_user_agent', '')
+
+    mt_device = generate_mt_device_id(raw_device_id)
+    submit_body = {
+        'addressId': address_id,
+        'amount': amount,
+        'deviceId': mt_device,
+        'priorityRecordId': rid,
+        'purchaseType': 1,
+        'shopId': '0',
+        'source': 'H5',
+        'spuId': sku_id,
+    }
+
+    headers = {
+        'Host': 'h5.moutai519.com.cn', 'MT-K': '__MTK__',
+        'MT-Device-ID': mt_device,
+        'Cookie': f'MT-Token-Wap={token}',
+        'User-Agent': user_agent,
+        'content-type': 'application/json',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': 'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
+    }
+
+    await websocket.send_text(json.dumps({
+        'type': 'relay_request', 'round_id': relay_state['round_id'],
+        'account_index': relay_state['account_index'], 'phone': phone,
+        'url': 'https://h5.moutai519.com.cn/xhr/front/trade/submit/v2',
+        'method': 'POST', 'headers': headers,
+        'body': json.dumps(submit_body),
+        'raw_device_id': raw_device_id,
+    }, ensure_ascii=False))
+    print(f'[中继] 📤 submit | [{phone}] rid={rid}')
+
+
+async def _relay_pay(websocket: WebSocket, relay_key: tuple, relay_state: dict, resp_body: str):
+    """中继步骤4: 支付"""
+    phone = relay_state['phone']
+
+    # 解析订单ID
+    try:
+        submit_data = json.loads(resp_body) if isinstance(resp_body, str) else resp_body
+        order_id = submit_data.get('data', {}).get('orderId', '')
+        if not order_id:
+            print(f'[中继] ❌ [{phone}] 提交成功但无 orderId')
+            _relay_states.pop(relay_key, None)
+            return
+    except Exception as e:
+        print(f'[中继] ❌ [{phone}] 订单解析失败: {e}')
+        _relay_states.pop(relay_key, None)
+        return
+
+    relay_state['step'] = 'pay'
+    token = relay_state.get('_token', '')
+    user_agent = relay_state.get('_user_agent', '')
+
+    headers = {
+        'Host': 'h5.moutai519.com.cn', 'MT-K': '__MTK__',
+        'Cookie': f'MT-Token-Wap={token}',
+        'User-Agent': user_agent,
+        'content-type': 'application/json',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': 'https://h5.moutai519.com.cn/mt/item/smsp-detail?appConfig=2_1_2',
+    }
+
+    await websocket.send_text(json.dumps({
+        'type': 'relay_request', 'round_id': relay_state['round_id'],
+        'account_index': relay_state['account_index'], 'phone': phone,
+        'url': f'https://h5.moutai519.com.cn/xhr/front/trade/payOrder',
+        'method': 'POST', 'headers': headers,
+        'body': json.dumps({'orderId': order_id, 'payMethod': 0}),
+        'raw_device_id': relay_state.get('_raw_device_id', ''),
+    }, ensure_ascii=False))
+    print(f'[中继] 📤 pay | [{phone}] orderId={order_id}')
+
+
+async def _get_relay_account(phone: str, user_id: int) -> dict:
+    """获取中继账号信息"""
+    from routes.api_client import _get_phone_accounts
+    try:
+        db2 = next(get_db())
+        cfg2 = get_user_config(user_id, db2)
+        multi_open = getattr(cfg2, 'phone_multi_open_count', 3) or 3
+        device_assign = getattr(cfg2, 'phone_device_assign', '')
+        all_accounts = _get_phone_accounts(user_id, multi_open, db2, device_assign)
+        db2.close()
+        return next((a for a in all_accounts if a.get('phone') == phone), None)
+    except Exception as e:
+        print(f'[中继] ❌ 获取账号失败: {e}')
+        return None
+
+
 @app.websocket("/api/phone_proxy/ws")
 async def phone_proxy_websocket(websocket: WebSocket):
     await websocket.accept()
@@ -2275,14 +2707,57 @@ async def phone_proxy_websocket(websocket: WebSocket):
 
                 # 查询当前用户的手机抢购状态，注册时一并下发
                 status_data = {'phone_rush_enabled': 0, 'rush_paused': 0}
+                rush_cfg = None  # 完整抢购配置（开启时下发）
                 if user_id:
                     try:
                         db2 = next(get_db())
                         cfg2 = get_user_config(user_id, db2)
+                        phone_enabled = getattr(cfg2, 'phone_rush_enabled', 0) or 0
                         status_data = {
-                            'phone_rush_enabled': getattr(cfg2, 'phone_rush_enabled', 0) or 0,
+                            'phone_rush_enabled': phone_enabled,
                             'rush_paused': getattr(cfg2, 'rush_paused', 0) or 0,
                         }
+                        # ★ 手机抢购已开启 → 主动下发完整 rush_config（解决服务重启后手机配置丢失）
+                        if phone_enabled:
+                            from routes.api_client import _get_phone_accounts
+                            import datetime as _dt
+                            interval_mode = getattr(cfg2, 'interval_mode', 0) or 0
+                            base_h = getattr(cfg2, 'rush_hour', 8) or 8
+                            base_m = getattr(cfg2, 'rush_minute', 58) or 58
+                            base_s = getattr(cfg2, 'rush_second', 0) or 0
+                            base_ms = getattr(cfg2, 'rush_millisecond', 500) or 500
+                            if interval_mode == 1:
+                                now_dt = _dt.datetime.now()
+                                base_time = now_dt.replace(hour=base_h, minute=base_m, second=base_s, microsecond=base_ms * 1000)
+                                if base_time <= now_dt:
+                                    elapsed = (now_dt - base_time).total_seconds()
+                                    intervals = int(elapsed // 300) + 1
+                                    rush_time = base_time + _dt.timedelta(seconds=intervals * 300)
+                                else:
+                                    rush_time = base_time
+                                rh, rm, rs, rms = rush_time.hour, rush_time.minute, rush_time.second, rush_time.microsecond // 1000
+                            else:
+                                rh, rm, rs, rms = base_h, base_m, base_s, base_ms
+                            # ★ 注意：100ms 到达前移由手机 App 端处理，服务端只发送原始时间
+                            rush_time_str = f"{rh:02d}:{rm:02d}:{rs:02d}.{rms:03d}"
+                            multi_open = getattr(cfg2, 'phone_multi_open_count', 3) or 3
+                            device_assign = getattr(cfg2, 'phone_device_assign', '')
+                            all_accounts = _get_phone_accounts(user_id, multi_open, db2, device_assign)
+                            first_acc = all_accounts[0] if all_accounts else {}
+                            rush_cfg = {
+                                'type': 'rush_config',
+                                'rush_config': {
+                                    'round_id': f"{rh}{rm}{rs}_{int(_dt.datetime.now().timestamp())}",
+                                    'rush_time': rush_time_str,
+                                    'item_code': first_acc.get('item_code', 'IMTP1000313'),
+                                    'frequency_ms': getattr(cfg2, 'task_frequency', 100) or 100,
+                                    'rush_count': getattr(cfg2, 'rush_count', 100) or 100,
+                                    'interval_mode': interval_mode,
+                                    'act_id': first_acc.get('activity_id', '82107'),
+                                    'sku_id': first_acc.get('sku_id', '741'),
+                                    'accounts': all_accounts,
+                                }
+                            }
                         db2.close()
                     except Exception:
                         pass
@@ -2292,6 +2767,10 @@ async def phone_proxy_websocket(websocket: WebSocket):
                     'tunnel_id': device_id,
                     'status': status_data,
                 }, ensure_ascii=False))
+                # ★ 注册成功后立即推送完整配置（手机收到后开始倒计时）
+                if rush_cfg:
+                    await websocket.send_text(json.dumps(rush_cfg, ensure_ascii=False))
+                    print(f'[手机WS] {name} 已下发完整配置 | time={rush_cfg["rush_config"]["rush_time"]} | accounts={len(rush_cfg["rush_config"]["accounts"])}')
                 print(f'[手机WS] {name} 已注册 | device={device_id} | uid={user_id}')
 
             elif msg_type == 'rush_result':
@@ -2317,6 +2796,14 @@ async def phone_proxy_websocket(websocket: WebSocket):
             elif msg_type == 'ping':
                 # 客户端心跳保活 → 回复pong
                 await websocket.send_text(json.dumps({'type': 'pong'}, ensure_ascii=False))
+
+            elif msg_type == 'request_prebuilt':
+                # ★ 空壳核心：手机请求预构建包
+                await _handle_request_prebuilt(websocket, msg, user_id, device_id)
+
+            elif msg_type == 'rush_response':
+                # ★ 空壳核心：手机回传抢购结果（2000 → 触发组单/下单/支付中继）
+                await _handle_rush_response(websocket, msg, user_id, device_id)
 
     except WebSocketDisconnect:
         pass
@@ -4528,6 +5015,7 @@ if __name__ == '__main__':
     import socket
     # ========== 启动前端口占用检测 ==========
     _check_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    _check_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # 允许复用 TIME_WAIT 状态的端口
     try:
         _check_sock.bind(('0.0.0.0', Config.PORT))
         _check_sock.close()
@@ -4551,7 +5039,7 @@ if __name__ == '__main__':
     print(f"\n{'='*50}")
     print(f" FastAPI 服务启动成功！")
     print(f" 本地访问: http://127.0.0.1:{Config.PORT}")
-    print(f" 内网访问: http://{'ipla.top'}:{Config.PORT}")
+    print(f" 内网访问: http://8.137.86.132:{Config.PORT}")
     print(f" 文档地址: http://127.0.0.1:{Config.PORT}/docs")
     print(f"{'='*50}\n")
     sys.stdout.flush()  # 确保启动横幅立即输出，不被缓冲
